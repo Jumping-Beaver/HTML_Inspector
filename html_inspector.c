@@ -1117,10 +1117,6 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
                 while (CHARMASK_TAG_NAME_END[html[name_length]] == 0) {
                     name_length += 1;
                 }
-                /*if (body_node != -1 && !CHARSEQICMP(html, name_length, "head")) {
-                    html += name_length + 1;
-                    continue;
-                }*/
 
                 bool has_found_start_node = false;
                 int k;
@@ -1452,74 +1448,6 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
         hi->doc->nodes = NULL;
         return hi;
     }
-
-    // Next we handle optional end nodes
-    // See: https://html.spec.whatwg.org/multipage/syntax.html#optional-nodes
-
-    /*struct {
-        char *tag;
-        char **delimiting_tags;
-    } optional_end_nodes[] = {
-        {"html", (char *[]) {NULL}},
-        {"head", (char *[]) {"body", NULL}},
-        {"body", (char *[]) {NULL}},
-        {"li", (char *[]) {"li", NULL}},
-        {"dt", (char *[]) {"dt", "dd", NULL}},
-        {"dd", (char *[]) {"dt", "dd", NULL}},
-        {"p", (char *[]) {"address", "article", "aside", "blockquote", "details", "div", "dl", "fieldset",
-                          "figcaption", "figure", "footer", "form", "h1", "h2", "h3", "h4", "h5", "h6",
-                          "header", "hgroup", "hr", "main", "menu", "nav", "ol", "p", "pre", "search",
-                          "section", "table", "ul", NULL}},
-        {"rt", (char *[]) {"rt", "rp", NULL}},
-        {"rp", (char *[]) {"rt", "rp", NULL}},
-        {"optgroup", (char *[]) {"optgroup", "hr", NULL}},
-        {"option", (char *[]) {"option", "optgroup", "hr", NULL}},
-        {"colgroup", (char *[]) {"thead", "tbody", "tfoot", NULL}},
-        {"caption", (char *[]) {NULL}},
-        {"thead", (char *[]) {"tbody", "tfoot", NULL}},
-        {"tbody", (char *[]) {"tfoot", NULL}},
-        {"tfoot", (char *[]) {NULL}},
-        {"tr", (char *[]) {"tr", NULL}},
-        {"th", (char *[]) {"td", "th", NULL}},
-        {"td", (char *[]) {"td", "th", NULL}},
-    };
-
-    int i, k;
-    for (i = 0; i < hi->doc->node_count; ++i) {
-        if (hi->doc->nodes[i].type != NODE_TYPE_UNCLOSED_ELEMENT) {
-            continue;
-        }
-        char **delimiting_tags = NULL;
-        for (k = 0; k < sizeof optional_end_nodes / sizeof *optional_end_nodes; ++k) {
-            if (strlen(optional_end_nodes[k].tag) == hi->doc->nodes[i].name_length &&
-                !strnicmp(optional_end_nodes[k].tag, hi->doc->nodes[i].name_start, hi->doc->nodes[i].name_length))
-            {
-                delimiting_tags = optional_end_nodes[k].delimiting_tags;
-                break;
-            }
-        }
-        for (k = i + 1; k < hi->doc->node_count; ++k) {
-            if (hi->doc->nodes[k].nesting_level < hi->doc->nodes[i].nesting_level) {
-                // TODO: Do this for all non-void elements?
-                goto found_delimiter;
-            }
-            if (delimiting_tags == NULL) {
-                continue;
-            }
-            for (int m = 0; delimiting_tags[m] != NULL; ++m) {
-                if (strlen(delimiting_tags[m]) == hi->doc->nodes[k].name_length &&
-                    !strnicmp(delimiting_tags[m], hi->doc->nodes[k].name_start, hi->doc->nodes[k].name_length))
-                {
-                    goto found_delimiter;
-                }
-            }
-        }
-    found_delimiter:
-        hi->doc->nodes[i].type = NODE_TYPE_NONVOID_ELEMENT;
-        while (--k > i) {
-            hi->doc->nodes[k].nesting_level += 1;
-        }
-    }*/
 
     // Next we close all unclosed elements
 
