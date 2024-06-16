@@ -100,9 +100,6 @@ void benchmark_loading()
     struct HtmlInspector *hi;
     hi = HtmlInspector(html);
     HtmlInspector_print_stats(hi);
-    HtmlInspector_dump(hi);
-    HtmlInspector_free(hi);
-    return;
     clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &start);
     for (i = 0; i < 200; ++i) {
         hi = HtmlInspector(html);
@@ -282,7 +279,6 @@ void test_outer_html()
     };
     for (int i = 0; i < sizeof test_cases / sizeof *test_cases; ++i) {
         struct HtmlInspector *hi = HtmlInspector(test_cases[i].input);
-        HtmlInspector_dump(hi);
         if (hi == NULL) {
             printf("OOM\n");
             continue;
@@ -291,6 +287,7 @@ void test_outer_html()
         if (strncmp(test_cases[i].outer_html, outer_html.data, outer_html.length)) {
             printf("Input: %s\nExpected output:\n%s\nActual output:\n%.*s\n\n",
                    test_cases[i].input, test_cases[i].outer_html, outer_html.length, outer_html.data);
+            HtmlInspector_dump(hi);
         }
         HtmlInspector_free(hi);
     }
@@ -309,8 +306,8 @@ int main()
         string_free(name);
     }
     */
-    test_outer_html();
-    //benchmark_loading();
+    //test_outer_html();
+    benchmark_loading();
     //benchmark_resolve_url();
     //test_url_join();
     //test_entities_to_utf8();

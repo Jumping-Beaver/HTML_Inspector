@@ -955,56 +955,79 @@ void HtmlInspector_free(struct HtmlInspector *hi)
 // At each start tag, we go back and look for unclosed tags to auto-close
 // See: https://html.spec.whatwg.org/multipage/syntax.html#optional-nodes
 
+#define STR(s) (struct Str) {sizeof s
+
+// Using `ConstStr` to avoid `strlen` calls improves the performance from 160/sec to 200/sec
+// for `AUTOCLOSING_TAGS`.
+
+struct ConstStr {const char *data; int length;};
+#define CONST_STR(s) (struct ConstStr) {s, sizeof s - 1}
+
+const struct ConstStr VOID_ELEMENTS[] = {
+    CONST_STR("area"),
+    CONST_STR("base"),
+    CONST_STR("br"),
+    CONST_STR("col"),
+    CONST_STR("embed"),
+    CONST_STR("hr"),
+    CONST_STR("img"),
+    CONST_STR("input"),
+    CONST_STR("link"),
+    CONST_STR("meta"),
+    CONST_STR("source"),
+    CONST_STR("track"),
+    CONST_STR("wbr"),
+};
 const struct {
-    char *autoclosing_tag;
-    char **autoclosed_tags;
+    struct ConstStr autoclosing_tag;
+    struct ConstStr *autoclosed_tags;
 } AUTOCLOSING_TAGS[] = {
-    {"body", (char *[]) {"head", NULL}},
-    {"li", (char *[]) {"li", NULL}},
-    {"dt", (char *[]) {"dt", "dd", NULL}},
-    {"dd", (char *[]) {"dt", "dd", NULL}},
-    {"address", (char *[]) {"p", NULL}},
-    {"article", (char *[]) {"p", NULL}},
-    {"aside", (char *[]) {"p", NULL}},
-    {"blockquote", (char *[]) {"p", NULL}},
-    {"details", (char *[]) {"p", NULL}},
-    {"div", (char *[]) {"p", NULL}},
-    {"dl", (char *[]) {"p", NULL}},
-    {"fieldset", (char *[]) {"p", NULL}},
-    {"figcaption", (char *[]) {"p", NULL}},
-    {"figure", (char *[]) {"p", NULL}},
-    {"footer", (char *[]) {"p", NULL}},
-    {"form", (char *[]) {"p", NULL}},
-    {"h1", (char *[]) {"p", NULL}},
-    {"h2", (char *[]) {"p", NULL}},
-    {"h3", (char *[]) {"p", NULL}},
-    {"h4", (char *[]) {"p", NULL}},
-    {"h5", (char *[]) {"p", NULL}},
-    {"h6", (char *[]) {"p", NULL}},
-    {"header", (char *[]) {"p", NULL}},
-    {"hgroup", (char *[]) {"p", NULL}},
-    {"hr", (char *[]) {"p", NULL}},
-    {"main", (char *[]) {"p", NULL}},
-    {"menu", (char *[]) {"p", NULL}},
-    {"nav", (char *[]) {"p", NULL}},
-    {"ol", (char *[]) {"p", NULL}},
-    {"p", (char *[]) {"p", NULL}},
-    {"pre", (char *[]) {"p", NULL}},
-    {"search", (char *[]) {"p", NULL}},
-    {"section", (char *[]) {"p", NULL}},
-    {"table", (char *[]) {"p", NULL}},
-    {"ul", (char *[]) {"p", NULL}},
-    {"rt", (char *[]) {"rt", "rp", NULL}},
-    {"rp", (char *[]) {"rt", "rp", NULL}},
-    {"optgroup", (char *[]) {"optgroup", "option", NULL}},
-    {"hr", (char *[]) {"optgroup", "option", NULL}},
-    {"option", (char *[]) {"option", NULL}},
-    {"thead", (char *[]) {"colgroup", NULL}},
-    {"tbody", (char *[]) {"colgroup", "thead", NULL}},
-    {"tfoot", (char *[]) {"colgroup", "thead", "tbody", NULL}},
-    {"tr", (char *[]) {"tr", NULL}},
-    {"td", (char *[]) {"th", "td", NULL}},
-    {"th", (char *[]) {"th", "td", NULL}},
+    {CONST_STR("body"), (struct ConstStr []) {CONST_STR("head"), CONST_STR(NULL)}},
+    {CONST_STR("li"), (struct ConstStr []) {CONST_STR("li"), CONST_STR(NULL)}},
+    {CONST_STR("dt"), (struct ConstStr[]) {CONST_STR("dt"), CONST_STR("dd"), CONST_STR(NULL)}},
+    {CONST_STR("dd"), (struct ConstStr[]) {CONST_STR("dt"), CONST_STR("dd"), CONST_STR(NULL)}},
+    {CONST_STR("address"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
+    {CONST_STR("article"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
+    {CONST_STR("aside"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
+    {CONST_STR("blockquote"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
+    {CONST_STR("details"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
+    {CONST_STR("div"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
+    {CONST_STR("dl"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
+    {CONST_STR("fieldset"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
+    {CONST_STR("figcaption"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
+    {CONST_STR("figure"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
+    {CONST_STR("footer"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
+    {CONST_STR("form"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
+    {CONST_STR("h1"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
+    {CONST_STR("h2"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
+    {CONST_STR("h3"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
+    {CONST_STR("h4"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
+    {CONST_STR("h5"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
+    {CONST_STR("h6"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
+    {CONST_STR("header"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
+    {CONST_STR("hgroup"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
+    {CONST_STR("hr"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
+    {CONST_STR("main"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
+    {CONST_STR("menu"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
+    {CONST_STR("nav"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
+    {CONST_STR("ol"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
+    {CONST_STR("p"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
+    {CONST_STR("pre"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
+    {CONST_STR("search"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
+    {CONST_STR("section"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
+    {CONST_STR("table"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
+    {CONST_STR("ul"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
+    {CONST_STR("rt"), (struct ConstStr[]) {CONST_STR("rt"), CONST_STR("rp"), CONST_STR(NULL)}},
+    {CONST_STR("rp"), (struct ConstStr[]) {CONST_STR("rt"), CONST_STR("rp"), CONST_STR(NULL)}},
+    {CONST_STR("optgroup"), (struct ConstStr[]) {CONST_STR("optgroup"), CONST_STR("option"), CONST_STR(NULL)}},
+    {CONST_STR("hr"), (struct ConstStr[]) {CONST_STR("optgroup"), CONST_STR("option"), CONST_STR(NULL)}},
+    {CONST_STR("option"), (struct ConstStr[]) {CONST_STR("option"), CONST_STR(NULL)}},
+    {CONST_STR("thead"), (struct ConstStr[]) {CONST_STR("colgroup"), CONST_STR(NULL)}},
+    {CONST_STR("tbody"), (struct ConstStr[]) {CONST_STR("colgroup"), CONST_STR("thead"), CONST_STR(NULL)}},
+    {CONST_STR("tfoot"), (struct ConstStr[]) {CONST_STR("colgroup"), CONST_STR("thead"), CONST_STR("tbody"), CONST_STR(NULL)}},
+    {CONST_STR("tr"), (struct ConstStr[]) {CONST_STR("tr"), CONST_STR(NULL)}},
+    {CONST_STR("td"), (struct ConstStr[]) {CONST_STR("th"), CONST_STR("td"), CONST_STR(NULL)}},
+    {CONST_STR("th"), (struct ConstStr[]) {CONST_STR("th"), CONST_STR("td"), CONST_STR(NULL)}},
 };
 
 static struct HtmlInspector * HtmlInspector(const unsigned char *html)
@@ -1040,6 +1063,10 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
         return NULL;
     }
 
+    // TODO Make it dynamic with malloc
+    int unclosed_elements[100];   // Actually: unclosed_nesting_level_1_elements
+    int unclosed_elements_size = 0;
+
     hi->doc->nodes[0] = (struct Node) {
         .name_start = "#document",
         .name_length = sizeof "#document" - 1,
@@ -1057,25 +1084,6 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
 
     int attributes_count = 0;
     int html_node = -1, head_node = -1, body_node = -1, tbody_node = -2, colgroup_node = -1;
-
-    const struct {
-        char *data;
-        int length;
-    } void_elements[] = {
-        {"area", sizeof "area" - 1},
-        {"base", sizeof "base" - 1},
-        {"br", sizeof "br" - 1},
-        {"col", sizeof "col" - 1},
-        {"embed", sizeof "embed" - 1},
-        {"hr", sizeof "hr" - 1},
-        {"img", sizeof "img" - 1},
-        {"input", sizeof "input" - 1},
-        {"link", sizeof "link" - 1},
-        {"meta", sizeof "meta" - 1},
-        {"source", sizeof "source" - 1},
-        {"track", sizeof "track" - 1},
-        {"wbr", sizeof "wbr" - 1}
-    };
 
     // Optimized standard library functions such as strchr and strpbrk traverse the string word for
     // word and not byte for byte. But called in a loop, they are slower because of the overhead of
@@ -1129,6 +1137,7 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
                     ) {
                         has_found_start_node = true;
                         hi->doc->nodes[k].type = NODE_TYPE_NONVOID_ELEMENT;
+                        // TODO Cut off unclosed_elements_size
                         break;
                     }
                 }
@@ -1183,6 +1192,7 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
                         .type = NODE_TYPE_UNCLOSED_ELEMENT,
                         .nesting_level = 1,
                     };
+                    unclosed_elements[unclosed_elements_size++] = hi->doc->node_count;
                     html_node = hi->doc->node_count;
                     INCREMENT_NODE_COUNT();
                 }
@@ -1194,6 +1204,7 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
                         .type = NODE_TYPE_UNCLOSED_ELEMENT,
                         .nesting_level = 1,
                     };
+                    unclosed_elements[unclosed_elements_size++] = hi->doc->node_count;
                     INCREMENT_NODE_COUNT();
                 }
                 if (body_node == -1 &&
@@ -1213,6 +1224,7 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
                         .type = NODE_TYPE_UNCLOSED_ELEMENT,
                         .nesting_level = 1
                     };
+                    unclosed_elements[unclosed_elements_size++] = hi->doc->node_count;
                     body_node = hi->doc->node_count;
                     INCREMENT_NODE_COUNT();
                     if (head_node != -1) {
@@ -1238,6 +1250,7 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
                         .type = NODE_TYPE_UNCLOSED_ELEMENT,
                         .nesting_level = 1
                     };
+                    unclosed_elements[unclosed_elements_size++] = hi->doc->node_count;
                     tbody_node = hi->doc->node_count;
                     INCREMENT_NODE_COUNT();
                 }
@@ -1255,6 +1268,7 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
                         .type = NODE_TYPE_UNCLOSED_ELEMENT,
                         .nesting_level = 1
                     };
+                    unclosed_elements[unclosed_elements_size++] = hi->doc->node_count;
                     tbody_node = hi->doc->node_count;
                     INCREMENT_NODE_COUNT();
                 }
@@ -1274,11 +1288,12 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
                 }
                 else {
                     bool is_void_element = false;
-                    for (int k = 0; k < sizeof void_elements / sizeof *void_elements; ++k) {
-                        if (void_elements[k].length == name_length &&
-                            !strnicmp(html, void_elements[k].data, name_length))
+                    for (int k = 0; k < sizeof VOID_ELEMENTS / sizeof *VOID_ELEMENTS; ++k) {
+                        if (VOID_ELEMENTS[k].length == name_length &&
+                            !strnicmp(html, VOID_ELEMENTS[k].data, name_length))
                         {
                             is_void_element = true;
+                            unclosed_elements[unclosed_elements_size++] = hi->doc->node_count;
                             break;
                         }
                     }
@@ -1324,31 +1339,39 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
                 }
                 html += 1;  // Skipping over `>`
 
+                struct ConstStr *autoclosed_tags = NULL;
                 for (int i = 0; i < sizeof AUTOCLOSING_TAGS / sizeof *AUTOCLOSING_TAGS; ++i) {
-                    if (strlen(AUTOCLOSING_TAGS[i].autoclosing_tag) != hi->doc->nodes[hi->doc->node_count - 1].name_length ||
-                        strnicmp(AUTOCLOSING_TAGS[i].autoclosing_tag, hi->doc->nodes[hi->doc->node_count - 1].name_start, strlen(AUTOCLOSING_TAGS[i].autoclosing_tag)))
+                    if (AUTOCLOSING_TAGS[i].autoclosing_tag.length == hi->doc->nodes[hi->doc->node_count - 1].name_length &&
+                        !strnicmp(AUTOCLOSING_TAGS[i].autoclosing_tag.data, hi->doc->nodes[hi->doc->node_count - 1].name_start, AUTOCLOSING_TAGS[i].autoclosing_tag.length))
                     {
+                        autoclosed_tags = AUTOCLOSING_TAGS[i].autoclosed_tags;
+                        break;
+                    }
+                }
+                if (autoclosed_tags == NULL) {
+                    goto end;
+                }
+                int num_nomatch = 0, num_it = 0;
+                for (int k = hi->doc->node_count - 2; k > 0; --k) {
+                    if (hi->doc->nodes[k].nesting_level != 1 || hi->doc->nodes[k].type != NODE_TYPE_UNCLOSED_ELEMENT) {
+                        num_nomatch++;
                         continue;
                     }
-                    for (int k = hi->doc->node_count - 2; k >= 0; --k) {
-                        if (hi->doc->nodes[k].nesting_level != 1 || hi->doc->nodes[k].type != NODE_TYPE_UNCLOSED_ELEMENT) {
+                    for (int m = 0; autoclosed_tags[m].data; ++m) {
+                        if (autoclosed_tags[m].length != hi->doc->nodes[k].name_length ||
+                            strnicmp(autoclosed_tags[m].data, hi->doc->nodes[k].name_start, autoclosed_tags[m].length))
+                        {
                             continue;
                         }
-                        for (int m = 0; AUTOCLOSING_TAGS[i].autoclosed_tags[m]; ++m) {
-                            if (strlen(AUTOCLOSING_TAGS[i].autoclosed_tags[m]) != hi->doc->nodes[k].name_length ||
-                                strnicmp(AUTOCLOSING_TAGS[i].autoclosed_tags[m], hi->doc->nodes[k].name_start, strlen(AUTOCLOSING_TAGS[i].autoclosed_tags[m])))
-                            {
-                                continue;
-                            }
-                            hi->doc->nodes[k].type = NODE_TYPE_NONVOID_ELEMENT;
-                            for (int z = k + 1; z < hi->doc->node_count - 1; ++z) {
-                                hi->doc->nodes[z].nesting_level += 1;
-                            }
-                            break;
+                        hi->doc->nodes[k].type = NODE_TYPE_NONVOID_ELEMENT;
+                        for (int z = k + 1; z < hi->doc->node_count - 1; ++z) {
+                            hi->doc->nodes[z].nesting_level += 1;
                         }
+                        break;
                     }
-                    break;
                 }
+                printf("%d %d\n", num_nomatch, num_it);
+                end:
             }
         }
         if (*html == '\0') {

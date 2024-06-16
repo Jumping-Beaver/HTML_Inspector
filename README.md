@@ -60,14 +60,20 @@ function extract_anchors(string $html_utf8, string $document_uri)
 
 ## How is the fast performance achieved?
 
-- Most significant: Only two contiguous memory blocks are allocated to parse the document: a list
+- Conceptually: Only two contiguous memory blocks store the parsed document: a list
   of nodes and a list of attributes. Other parsers make thousands of memory allocations to
   build a tree data structure.
 
-- Data queries use lazy evaluation for the iteration over nodes and for the decoding of HTML
+- Conceptually: Data queries use lazy evaluation for the iteration over nodes and for the decoding of HTML
   entities to UTF-8.
 
+- Most essential implementation detail: The parser maintains a stack of unclosed tags to match them
+  quickly. Looping backwards through the whole node list to find them is very slow.
+
 - The named HTML entities are indexed by their first character.
+
+- Trivial but significant: Storing the `sizeof` value instead of calling `strlen` to get the length of
+  hard-coded tag names.
 
 ## What makes HTML difficult to parse?
 
