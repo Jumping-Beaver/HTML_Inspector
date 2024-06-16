@@ -261,24 +261,6 @@ void test_get_hrefs()
     free(html);
 }
 
-void test_attribute()
-{
-    char *html = "<a><b1></b1><c1 attr ></c1><d1></d1></a><a><b2></b2><c2></c2><d2></d2></a>";
-    struct HtmlInspector *hi = HtmlInspector(html);
-    HtmlInspector_dump(hi);
-    //HtmlInspector_descendant(ns, "c1");
-    HtmlInspector_child(hi);
-    HtmlInspector_name(hi, "c1");
-    //HtmlInspector_attribute_exists(ns, "attr");
-    //printf("%s\n", HtmlInspector_get_name(hi).data);
-    do {
-        struct String tag_name = HtmlInspector_get_name(hi);
-        printf("%.*s, %d\n", tag_name.length, tag_name.data, HtmlInspector_get_offset(hi));
-        string_free(tag_name);
-    } while (HtmlInspector_iterate(hi));
-    HtmlInspector_free(hi);
-}
-
 void test_outer_html()
 {
     // TODO: Insert empty head or not?
@@ -286,6 +268,9 @@ void test_outer_html()
         const char *input;
         const char *outer_html;
     } test_cases[] = {
+        {"<p>p<div>div</div></p>", "<html><head></head><body><p>p</p><div>div</div></body></html>"},
+        {"<head>a</head>", "<html><head></head><body>a</body></html>"},
+        {"<head><meta><body>", "<html><head><meta></head><body></body></html>"},
         {"<HTML LANG=en><META></HTML>", "<html lang=\"en\"><head><meta></head></html>"},
         {"<table><tr><td>a", "<html><head></head><body><table><tbody><tr><td>a</td></tr></tbody></table></body></html>"},
         {"<body a='<>&quot;'>&auml;&gt;&lt;&quot;&z", "<html><head></head><body a=\"<>&quot;\">ä&gt;&lt;\"&amp;z</body></html>"},
@@ -293,10 +278,15 @@ void test_outer_html()
         {" <!--a-->b", "<!--a--><html><body>b</body></html>"},
         {"<script><a>&auml;", "<html><head><script><a>&auml;</script></head></html>"},
         {"<title>a", "<html><head><title>a</title></head></html>"},
-        {"<head>a<body>b", "<html><body>ab</body></html>"},
+        {"<head>a<body>b", "<html><head></head><body>ab</body></html>"}, // TODO We get 2 text nodes here
     };
     for (int i = 0; i < sizeof test_cases / sizeof *test_cases; ++i) {
         struct HtmlInspector *hi = HtmlInspector(test_cases[i].input);
+        HtmlInspector_dump(hi);
+        if (hi == NULL) {
+            printf("OOM\n");
+            continue;
+        }
         struct String outer_html = HtmlInspector_get_outer_html(hi);
         if (strncmp(test_cases[i].outer_html, outer_html.data, outer_html.length)) {
             printf("Input: %s\nExpected output:\n%s\nActual output:\n%.*s\n\n",
@@ -308,6 +298,17 @@ void test_outer_html()
 
 int main()
 {
+    /*struct HtmlInspector *hi = HtmlInspector("<html><body><b>a</b></body></html>");
+    HtmlInspector_child(hi);
+    HtmlInspector_nth(hi, 1);
+    HtmlInspector_child(hi);
+    HtmlInspector_nth(hi, 2);
+    while (HtmlInspector_iterate(hi)) {
+        struct String name = HtmlInspector_get_name(hi);
+        printf("%.*s\n", name.length, name.data);
+        string_free(name);
+    }
+    */
     test_outer_html();
     //benchmark_loading();
     //benchmark_resolve_url();
