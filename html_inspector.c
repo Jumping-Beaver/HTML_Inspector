@@ -601,7 +601,7 @@ void string_free(struct String string)
     }
 }
 
-static int strnicmp(const char *s1, const char *s2, size_t length)
+static inline int strnicmp(const char *s1, const char *s2, size_t length)
 {
     int diff = 0;
     while (length--) {
@@ -954,84 +954,6 @@ void HtmlInspector_free(struct HtmlInspector *hi)
 
 #define CHARSEQICMP(s1, length, s2) (length != sizeof s2 - 1 || strnicmp(s1, s2, length))
 
-// At each start tag, we go back and look for unclosed tags to auto-close
-// See: https://html.spec.whatwg.org/multipage/syntax.html#optional-nodes
-
-#define STR(s) (struct Str) {sizeof s
-
-// Using `ConstStr` to avoid `strlen` calls improves the performance from 160/sec to 200/sec
-// for `AUTOCLOSING_TAGS`.
-
-struct ConstStr {const char *data; int length;};
-#define CONST_STR(s) (struct ConstStr) {s, sizeof s - 1}
-
-const struct ConstStr VOID_ELEMENTS[] = {
-    CONST_STR("area"),
-    CONST_STR("base"),
-    CONST_STR("br"),
-    CONST_STR("col"),
-    CONST_STR("embed"),
-    CONST_STR("hr"),
-    CONST_STR("img"),
-    CONST_STR("input"),
-    CONST_STR("link"),
-    CONST_STR("meta"),
-    CONST_STR("source"),
-    CONST_STR("track"),
-    CONST_STR("wbr"),
-};
-const struct {
-    struct ConstStr autoclosing_tag;
-    struct ConstStr *autoclosed_tags;
-} AUTOCLOSING_TAGS[] = {
-    {CONST_STR("body"), (struct ConstStr []) {CONST_STR("head"), CONST_STR(NULL)}},
-    {CONST_STR("li"), (struct ConstStr []) {CONST_STR("li"), CONST_STR(NULL)}},
-    {CONST_STR("dt"), (struct ConstStr[]) {CONST_STR("dt"), CONST_STR("dd"), CONST_STR(NULL)}},
-    {CONST_STR("dd"), (struct ConstStr[]) {CONST_STR("dt"), CONST_STR("dd"), CONST_STR(NULL)}},
-    {CONST_STR("address"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
-    {CONST_STR("article"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
-    {CONST_STR("aside"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
-    {CONST_STR("blockquote"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
-    {CONST_STR("details"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
-    {CONST_STR("div"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
-    {CONST_STR("dl"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
-    {CONST_STR("fieldset"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
-    {CONST_STR("figcaption"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
-    {CONST_STR("figure"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
-    {CONST_STR("footer"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
-    {CONST_STR("form"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
-    {CONST_STR("h1"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
-    {CONST_STR("h2"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
-    {CONST_STR("h3"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
-    {CONST_STR("h4"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
-    {CONST_STR("h5"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
-    {CONST_STR("h6"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
-    {CONST_STR("header"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
-    {CONST_STR("hgroup"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
-    {CONST_STR("hr"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
-    {CONST_STR("main"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
-    {CONST_STR("menu"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
-    {CONST_STR("nav"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
-    {CONST_STR("ol"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
-    {CONST_STR("p"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
-    {CONST_STR("pre"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
-    {CONST_STR("search"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
-    {CONST_STR("section"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
-    {CONST_STR("table"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
-    {CONST_STR("ul"), (struct ConstStr[]) {CONST_STR("p"), CONST_STR(NULL)}},
-    {CONST_STR("rt"), (struct ConstStr[]) {CONST_STR("rt"), CONST_STR("rp"), CONST_STR(NULL)}},
-    {CONST_STR("rp"), (struct ConstStr[]) {CONST_STR("rt"), CONST_STR("rp"), CONST_STR(NULL)}},
-    {CONST_STR("optgroup"), (struct ConstStr[]) {CONST_STR("optgroup"), CONST_STR("option"), CONST_STR(NULL)}},
-    {CONST_STR("hr"), (struct ConstStr[]) {CONST_STR("optgroup"), CONST_STR("option"), CONST_STR(NULL)}},
-    {CONST_STR("option"), (struct ConstStr[]) {CONST_STR("option"), CONST_STR(NULL)}},
-    {CONST_STR("thead"), (struct ConstStr[]) {CONST_STR("colgroup"), CONST_STR(NULL)}},
-    {CONST_STR("tbody"), (struct ConstStr[]) {CONST_STR("colgroup"), CONST_STR("thead"), CONST_STR(NULL)}},
-    {CONST_STR("tfoot"), (struct ConstStr[]) {CONST_STR("colgroup"), CONST_STR("thead"), CONST_STR("tbody"), CONST_STR(NULL)}},
-    {CONST_STR("tr"), (struct ConstStr[]) {CONST_STR("tr"), CONST_STR(NULL)}},
-    {CONST_STR("td"), (struct ConstStr[]) {CONST_STR("th"), CONST_STR("td"), CONST_STR(NULL)}},
-    {CONST_STR("th"), (struct ConstStr[]) {CONST_STR("th"), CONST_STR("td"), CONST_STR(NULL)}},
-};
-
 static struct HtmlInspector * HtmlInspector(const unsigned char *html)
 {
     // Minimizing the number of `realloc` calls is essential to achieve the best performance. We
@@ -1154,9 +1076,7 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
                 int k;
                 for (k = unclosed_elements_size - 1; k >= 0; --k) {
                     node = &hi->doc->nodes[unclosed_elements[k]];
-                    if (name_length == node->name_length &&
-                        !strnicmp(node->name_start, html, name_length))
-                    {
+                    if (name_length == node->name_length && !strnicmp(node->name_start, html, name_length)) {
                         has_found_start_node = true;
                         break;
                     }
@@ -1219,7 +1139,7 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
                     if (++new_attributes_count == attributes_capacity) {
                         attributes_capacity *= 1.2;
                         struct Attribute *new_attributes = realloc(
-                            hi->doc->attributes, attributes_capacity * sizeof (struct Attribute)
+                            hi->doc->attributes, attributes_capacity * sizeof *hi->doc->attributes
                         );
                         if (new_attributes == NULL) {
                             free(unclosed_elements);
@@ -1344,41 +1264,141 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
 
                     added_node.nesting_level = 1;
                     added_node.type = NODE_TYPE_UNCLOSED_ELEMENT;
-                    for (int k = 0; k < sizeof VOID_ELEMENTS / sizeof *VOID_ELEMENTS; ++k) {
-                        if (VOID_ELEMENTS[k].length == added_node.name_length &&
-                            !strnicmp(added_node.name_start, VOID_ELEMENTS[k].data, added_node.name_length))
-                        {
-                            added_node.type = NODE_TYPE_VOID_ELEMENT;
-                            break;
-                        }
+
+                    // Using long if confitions is much faster than looping through data tables
+                    // for the following tag-specific logic.
+
+                    // Void elements
+                    // https://html.spec.whatwg.org/multipage/syntax.html#void-elements
+
+                    if (
+                        !CHARSEQICMP(added_node.name_start, added_node.name_length, "br") ||
+                        !CHARSEQICMP(added_node.name_start, added_node.name_length, "img") ||
+                        !CHARSEQICMP(added_node.name_start, added_node.name_length, "meta") ||
+                        !CHARSEQICMP(added_node.name_start, added_node.name_length, "link") ||
+                        !CHARSEQICMP(added_node.name_start, added_node.name_length, "input") ||
+                        !CHARSEQICMP(added_node.name_start, added_node.name_length, "embed") ||
+                        !CHARSEQICMP(added_node.name_start, added_node.name_length, "base") ||
+                        !CHARSEQICMP(added_node.name_start, added_node.name_length, "hr") ||
+                        !CHARSEQICMP(added_node.name_start, added_node.name_length, "col") ||
+                        !CHARSEQICMP(added_node.name_start, added_node.name_length, "area") ||
+                        !CHARSEQICMP(added_node.name_start, added_node.name_length, "wbr") ||
+                        !CHARSEQICMP(added_node.name_start, added_node.name_length, "source") ||
+                        !CHARSEQICMP(added_node.name_start, added_node.name_length, "track")
+                    ) {
+                        added_node.type = NODE_TYPE_VOID_ELEMENT;
                     }
 
-                    // Auto-close unclosed nodes
+                    // Auto-close unclosed nodes with optional end tag
+                    // https://html.spec.whatwg.org/multipage/syntax.html#optional-tags
 
-                    for (int i = 0; i < sizeof AUTOCLOSING_TAGS / sizeof *AUTOCLOSING_TAGS; ++i) {
-                        if (AUTOCLOSING_TAGS[i].autoclosing_tag.length != added_node.name_length ||
-                            strnicmp(AUTOCLOSING_TAGS[i].autoclosing_tag.data, added_node.name_start, AUTOCLOSING_TAGS[i].autoclosing_tag.length))
-                        {
-                            continue;
+                    struct Node *node = &hi->doc->nodes[unclosed_elements[unclosed_elements_size - 1]];
+
+                    if (
+                        !CHARSEQICMP(added_node.name_start, added_node.name_length, "body") &&
+                        !CHARSEQICMP(node->name_start, node->name_length, "head") ||
+
+                        !CHARSEQICMP(added_node.name_start, added_node.name_length, "li") &&
+                        !CHARSEQICMP(node->name_start, node->name_length, "li") ||
+
+                        !CHARSEQICMP(added_node.name_start, added_node.name_length, "option") &&
+                        !CHARSEQICMP(node->name_start, node->name_length, "option") ||
+
+                        !CHARSEQICMP(added_node.name_start, added_node.name_length, "thead") &&
+                        !CHARSEQICMP(node->name_start, node->name_length, "colgroup") ||
+
+                        !CHARSEQICMP(added_node.name_start, added_node.name_length, "thead") &&
+                        !CHARSEQICMP(node->name_start, node->name_length, "colgroup") ||
+
+                        !CHARSEQICMP(added_node.name_start, added_node.name_length, "tbody") &&
+                        (
+                            !CHARSEQICMP(node->name_start, node->name_length, "colgroup") ||
+                            !CHARSEQICMP(node->name_start, node->name_length, "thead")
+                        ) ||
+
+                        !CHARSEQICMP(added_node.name_start, added_node.name_length, "tfoot") &&
+                        (
+                            !CHARSEQICMP(node->name_start, node->name_length, "colgroup") ||
+                            !CHARSEQICMP(node->name_start, node->name_length, "thead") ||
+                            !CHARSEQICMP(node->name_start, node->name_length, "tbody")
+                        ) ||
+
+                        (
+                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "td") ||
+                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "th")
+                        ) &&
+                        (
+                            !CHARSEQICMP(node->name_start, node->name_length, "td") ||
+                            !CHARSEQICMP(node->name_start, node->name_length, "th")
+                        ) ||
+
+                        (
+                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "dt") ||
+                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "dd")
+                        ) &&
+                        (
+                            !CHARSEQICMP(node->name_start, node->name_length, "dt") ||
+                            !CHARSEQICMP(node->name_start, node->name_length, "dd")
+                        ) ||
+
+                        (
+                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "rt") ||
+                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "rp")
+                        ) &&
+                        (
+                            !CHARSEQICMP(node->name_start, node->name_length, "rt") ||
+                            !CHARSEQICMP(node->name_start, node->name_length, "rp")
+                        ) ||
+
+                        (
+                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "optgroup") ||
+                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "hr")
+                        ) &&
+                        (
+                            !CHARSEQICMP(node->name_start, node->name_length, "optgroup") ||
+                            !CHARSEQICMP(node->name_start, node->name_length, "option")
+                        ) ||
+
+                        !CHARSEQICMP(node->name_start, node->name_length, "p") &&
+                        (
+                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "address") ||
+                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "article") ||
+                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "aside") ||
+                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "blockquote") ||
+                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "details") ||
+                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "div") ||
+                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "dl") ||
+                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "fieldset") ||
+                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "figcaption") ||
+                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "figure") ||
+                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "footer") ||
+                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "form") ||
+                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "h1") ||
+                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "h2") ||
+                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "h3") ||
+                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "h4") ||
+                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "h5") ||
+                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "h6") ||
+                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "header") ||
+                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "hgroup") ||
+                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "hr") ||
+                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "main") ||
+                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "menu") ||
+                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "nav") ||
+                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "ol") ||
+                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "p") ||
+                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "pre") ||
+                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "search") ||
+                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "section") ||
+                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "table") ||
+                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "ul")
+                        )
+                    ) {
+                        node->type = NODE_TYPE_NONVOID_ELEMENT;
+                        while (++node < &hi->doc->nodes[hi->doc->node_count]) {
+                            node->nesting_level += 1;
                         }
-                        struct ConstStr *autoclosed_tags = AUTOCLOSING_TAGS[i].autoclosed_tags;
-                        for (int k = unclosed_elements_size - 1; k >= 0; --k) {
-                            struct Node *node = &hi->doc->nodes[unclosed_elements[k]];
-                            for (int m = 0; autoclosed_tags[m].data; ++m) {
-                                if (autoclosed_tags[m].length != node->name_length ||
-                                    strnicmp(autoclosed_tags[m].data, node->name_start, autoclosed_tags[m].length))
-                                {
-                                    continue;
-                                }
-                                node->type = NODE_TYPE_NONVOID_ELEMENT;
-                                while (++node < &hi->doc->nodes[hi->doc->node_count]) {
-                                    node->nesting_level += 1;
-                                }
-                                unclosed_elements_size = k;
-                                break;
-                            }
-                        }
-                        break;
+                        unclosed_elements_size -= 1;
                     }
 
                     // Append the node

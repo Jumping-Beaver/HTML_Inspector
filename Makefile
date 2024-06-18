@@ -1,4 +1,4 @@
-CFLAGS := -g -fshort-enums -Werror
+CFLAGS := -O2 -fshort-enums -Werror
 
 build/hi_test: hi_test.c html_inspector.c
 	gcc $(CFLAGS) hi_test.c -o "$@"

@@ -100,7 +100,7 @@ void benchmark_loading()
     struct HtmlInspector *hi;
     hi = HtmlInspector(html);
     //HtmlInspector_print_stats(hi);
-    HtmlInspector_dump(hi); return;
+    //HtmlInspector_dump(hi); return;
     clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &start);
     for (i = 0; i < 200; ++i) {
         hi = HtmlInspector(html);
@@ -266,7 +266,7 @@ void test_outer_html()
         const char *input;
         const char *outer_html;
     } test_cases[] = {
-        {"<ul><li>1</li><li><ul><li>2</li></ul></li></ul>", ""},
+        {"<ul><li>1<li><ul><li>2</ul></ul>", "<html><head></head><body><ul><li>1</li><li><ul><li>2</li></ul></li></ul></body></html>"},
         {"<body a='<>&quot;'>&auml;&gt;&lt;&quot;&z", "<html><head></head><body a=\"<>&quot;\">ä&gt;&lt;\"&amp;z</body></html>"},
         {"<HTML LANG=en><META></HTML>", "<html lang=\"en\"><head><meta></head></html>"},
         {"<!----><title>t", "<!----><html><head><title>t</title></head></html>"},
@@ -313,8 +313,8 @@ int main()
         string_free(name);
     }
     */
-    test_outer_html();
-    //benchmark_loading();
+    //test_outer_html();
+    benchmark_loading();
     //benchmark_resolve_url();
     //test_url_join();
     //test_entities_to_utf8();
