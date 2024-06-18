@@ -943,7 +943,9 @@ struct String HtmlInspector_extract_charset(const unsigned char *html)
 void HtmlInspector_free(struct HtmlInspector *hi)
 {
     if (--hi->doc->references == 0) {
-        free(hi->doc->attributes);
+        if (hi->doc->attributes != NULL) {
+            free(hi->doc->attributes);
+        }
         free(hi->doc->nodes);
         free(hi->doc);
     }
@@ -1063,9 +1065,28 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
         return NULL;
     }
 
-    // TODO Make it dynamic with malloc
-    int unclosed_elements[100];   // Actually: unclosed_nesting_level_1_elements
+    // We cannot use `struct Node *` pointers because `realloc` may break them
     int unclosed_elements_size = 0;
+    int unclosed_elements_capacity = 100;
+    int *unclosed_elements = malloc(unclosed_elements_capacity * sizeof *unclosed_elements);
+    if (unclosed_elements == NULL) {
+        free(hi->doc->nodes);
+        free(hi->doc);
+        free(hi);
+        return NULL;
+    }
+    #define INCREMENT_UNCLOSED_ELEMENTS_SIZE() \
+        if (++unclosed_elements_size == unclosed_elements_capacity - 1) { \
+            unclosed_elements_capacity += 100; \
+            int *new_unclosed_elements = realloc(unclosed_elements, \
+                unclosed_elements_capacity * sizeof *unclosed_elements); \
+            if (new_unclosed_elements == NULL) { \
+                free(unclosed_elements); \
+                HtmlInspector_free(hi); \
+                return NULL; \
+            } \
+            unclosed_elements = new_unclosed_elements; \
+        }
 
     hi->doc->nodes[0] = (struct Node) {
         .name_start = "#document",
@@ -1090,11 +1111,11 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
     // calculating the bitmasks in every call.
 
     #define INCREMENT_NODE_COUNT() \
-        hi->doc->node_count += 1; \
-        if (hi->doc->node_count == nodes_capacity - 1) { \
+        if (++hi->doc->node_count == nodes_capacity - 1) { \
             nodes_capacity = 1 + (int) (nodes_capacity * 1.2); \
             struct Node *new_nodes = realloc(hi->doc->nodes, nodes_capacity * sizeof (struct Node)); \
             if (new_nodes == NULL) { \
+                free(unclosed_elements); \
                 HtmlInspector_free(hi); \
                 return NULL; \
             } \
@@ -1105,16 +1126,18 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
         if (*html == '<') {
             html += 1;
             if (html[0] == '!' && html[1] == '-' && html[2] == '-') {
-                hi->doc->nodes[hi->doc->node_count].name_start = html + 3;
-                hi->doc->nodes[hi->doc->node_count].type = NODE_TYPE_COMMENT;
-                hi->doc->nodes[hi->doc->node_count].nesting_level = 1;
-                INCREMENT_NODE_COUNT();
                 html += 3;
-                do {
+                const unsigned char *comment_start = html;
+                while (html[0] != '\0' && (html[0] != '-' || html[1] != '-' || html[2] != '>')) {
                     html += 1;
-                } while (html[0] != '\0' && (html[0] != '-' || html[1] != '-' || html[2] != '>'));
-                hi->doc->nodes[hi->doc->node_count - 1].name_length =
-                    html - hi->doc->nodes[hi->doc->node_count - 1].name_start;
+                }
+                hi->doc->nodes[hi->doc->node_count] = (struct Node) {
+                    .name_start = comment_start,
+                    .name_length = html - comment_start,
+                    .type = NODE_TYPE_COMMENT,
+                    .nesting_level = 1,
+                };
+                INCREMENT_NODE_COUNT();
                 if (*html != '\0') {
                     html += 3;
                 }
@@ -1127,23 +1150,33 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
                 }
 
                 bool has_found_start_node = false;
+                struct Node *node;
                 int k;
-                for (k = hi->doc->node_count - 1; k >= 0; --k) {
-                    if (
-                        hi->doc->nodes[k].nesting_level == 1 &&
-                        name_length == hi->doc->nodes[k].name_length &&
-                        hi->doc->nodes[k].type == NODE_TYPE_UNCLOSED_ELEMENT &&
-                        !strnicmp(hi->doc->nodes[k].name_start, html, name_length)
-                    ) {
+                for (k = unclosed_elements_size - 1; k >= 0; --k) {
+                    node = &hi->doc->nodes[unclosed_elements[k]];
+                    if (name_length == node->name_length &&
+                        !strnicmp(node->name_start, html, name_length))
+                    {
                         has_found_start_node = true;
-                        hi->doc->nodes[k].type = NODE_TYPE_NONVOID_ELEMENT;
-                        // TODO Cut off unclosed_elements_size
                         break;
                     }
                 }
                 if (has_found_start_node) {
-                    for (k += 1; k < hi->doc->node_count; ++k) {
-                        hi->doc->nodes[k].nesting_level += 1;
+                    // Here we close all unclosed nodes between the matching start node and the last node.
+                    // Example:
+                    // <a>
+                    // <b>  ← indent_width = 1
+                    // text ← indent_width = 2
+                    // <c>  ← indent_width = 2
+                    // </a>
+                    int indent_width = unclosed_elements_size - k;
+                    for (int node_index = hi->doc->node_count - 1; node_index >= unclosed_elements[k]; --node_index) {
+                        if (node_index == unclosed_elements[unclosed_elements_size - 1]) {
+                            unclosed_elements_size -= 1;
+                            indent_width -= 1;
+                            hi->doc->nodes[node_index].type = NODE_TYPE_NONVOID_ELEMENT;
+                        }
+                        hi->doc->nodes[node_index].nesting_level += indent_width;
                     }
                 }
                 html += name_length;
@@ -1161,16 +1194,17 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
                 // following the stray tag. Stray tags are filtered out by the
                 // `HtmlInspector_entities_to_utf8` function.
 
-                struct Node *node = &hi->doc->nodes[hi->doc->node_count - 1];
+                node = &hi->doc->nodes[hi->doc->node_count - 1];
                 if (node->type != NODE_TYPE_TEXT) {
                     continue;
                 }
-                do {
+                while (*html != '<' && *html != '\0') {
                     html += 1;
-                } while (*html != '<' && *html != '\0');
+                }
                 node->value_length = html - node->value_start;
             }
             else {
+                // TODO: Define struct Node *added_node = NULL; & create loop
                 int name_length = 0;
                 while (CHARMASK_TAG_NAME_END[html[name_length]] == 0) {
                     name_length += 1;
@@ -1192,19 +1226,23 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
                         .type = NODE_TYPE_UNCLOSED_ELEMENT,
                         .nesting_level = 1,
                     };
-                    unclosed_elements[unclosed_elements_size++] = hi->doc->node_count;
+                    unclosed_elements[unclosed_elements_size] = hi->doc->node_count;
+                    INCREMENT_UNCLOSED_ELEMENTS_SIZE();
                     html_node = hi->doc->node_count;
                     INCREMENT_NODE_COUNT();
                 }
                 if (head_node == -1) {
-                    head_node = hi->doc->node_count;
                     hi->doc->nodes[hi->doc->node_count] = (struct Node) {
                         .name_start = "head",
                         .name_length = sizeof "head" - 1,
                         .type = NODE_TYPE_UNCLOSED_ELEMENT,
                         .nesting_level = 1,
                     };
-                    unclosed_elements[unclosed_elements_size++] = hi->doc->node_count;
+                    head_node = hi->doc->node_count;
+                    if (CHARSEQICMP(html, name_length, "head")) {
+                        unclosed_elements[unclosed_elements_size] = hi->doc->node_count;
+                        INCREMENT_UNCLOSED_ELEMENTS_SIZE();
+                    }
                     INCREMENT_NODE_COUNT();
                 }
                 if (body_node == -1 &&
@@ -1224,15 +1262,20 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
                         .type = NODE_TYPE_UNCLOSED_ELEMENT,
                         .nesting_level = 1
                     };
-                    unclosed_elements[unclosed_elements_size++] = hi->doc->node_count;
                     body_node = hi->doc->node_count;
                     INCREMENT_NODE_COUNT();
-                    if (head_node != -1) {
+                    if (head_node != -1 && CHARSEQICMP(html, name_length, "body")) {
                         hi->doc->nodes[head_node].type = NODE_TYPE_NONVOID_ELEMENT;
                         for (int i = head_node + 1; i < hi->doc->node_count - 1; ++i) {
                             hi->doc->nodes[i].nesting_level += 1;
                         }
+                        while (unclosed_elements[unclosed_elements_size - 1] != head_node) {
+                            unclosed_elements_size -= 1;
+                        }
+                        unclosed_elements_size -= 1;
                     }
+                    unclosed_elements[unclosed_elements_size] = hi->doc->node_count - 1;
+                    INCREMENT_UNCLOSED_ELEMENTS_SIZE();
                 }
 
                 if (!CHARSEQICMP(html, name_length, "table")) {
@@ -1250,7 +1293,8 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
                         .type = NODE_TYPE_UNCLOSED_ELEMENT,
                         .nesting_level = 1
                     };
-                    unclosed_elements[unclosed_elements_size++] = hi->doc->node_count;
+                    unclosed_elements[unclosed_elements_size] = hi->doc->node_count;
+                    INCREMENT_UNCLOSED_ELEMENTS_SIZE();
                     tbody_node = hi->doc->node_count;
                     INCREMENT_NODE_COUNT();
                 }
@@ -1268,7 +1312,8 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
                         .type = NODE_TYPE_UNCLOSED_ELEMENT,
                         .nesting_level = 1
                     };
-                    unclosed_elements[unclosed_elements_size++] = hi->doc->node_count;
+                    unclosed_elements[unclosed_elements_size] = hi->doc->node_count;
+                    INCREMENT_UNCLOSED_ELEMENTS_SIZE();
                     tbody_node = hi->doc->node_count;
                     INCREMENT_NODE_COUNT();
                 }
@@ -1293,7 +1338,6 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
                             !strnicmp(html, VOID_ELEMENTS[k].data, name_length))
                         {
                             is_void_element = true;
-                            unclosed_elements[unclosed_elements_size++] = hi->doc->node_count;
                             break;
                         }
                     }
@@ -1328,6 +1372,7 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
                             hi->doc->attributes, attributes_capacity * sizeof (struct Attribute)
                         );
                         if (new_attributes == NULL) {
+                            free(unclosed_elements);
                             HtmlInspector_free(hi);
                             return NULL;
                         }
@@ -1348,30 +1393,28 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
                         break;
                     }
                 }
-                if (autoclosed_tags == NULL) {
-                    goto end;
-                }
-                int num_nomatch = 0, num_it = 0;
-                for (int k = hi->doc->node_count - 2; k > 0; --k) {
-                    if (hi->doc->nodes[k].nesting_level != 1 || hi->doc->nodes[k].type != NODE_TYPE_UNCLOSED_ELEMENT) {
-                        num_nomatch++;
-                        continue;
-                    }
-                    for (int m = 0; autoclosed_tags[m].data; ++m) {
-                        if (autoclosed_tags[m].length != hi->doc->nodes[k].name_length ||
-                            strnicmp(autoclosed_tags[m].data, hi->doc->nodes[k].name_start, autoclosed_tags[m].length))
-                        {
-                            continue;
+                if (autoclosed_tags != NULL) {
+                    for (int k = unclosed_elements_size - 1; k >= 0; --k) {
+                        struct Node *node = &hi->doc->nodes[unclosed_elements[k]];
+                        for (int m = 0; autoclosed_tags[m].data; ++m) {
+                            if (autoclosed_tags[m].length != node->name_length ||
+                                strnicmp(autoclosed_tags[m].data, node->name_start, autoclosed_tags[m].length))
+                            {
+                                continue;
+                            }
+                            node->type = NODE_TYPE_NONVOID_ELEMENT;
+                            while (++node < &hi->doc->nodes[hi->doc->node_count - 1]) {
+                                node->nesting_level += 1;
+                            }
+                            unclosed_elements_size = k;
+                            break;
                         }
-                        hi->doc->nodes[k].type = NODE_TYPE_NONVOID_ELEMENT;
-                        for (int z = k + 1; z < hi->doc->node_count - 1; ++z) {
-                            hi->doc->nodes[z].nesting_level += 1;
-                        }
-                        break;
                     }
                 }
-                printf("%d %d\n", num_nomatch, num_it);
-                end:
+                if (hi->doc->nodes[hi->doc->node_count - 1].type == NODE_TYPE_UNCLOSED_ELEMENT) {
+                    unclosed_elements[unclosed_elements_size] = hi->doc->node_count - 1;
+                    INCREMENT_UNCLOSED_ELEMENTS_SIZE();
+                }
             }
         }
         if (*html == '\0') {
@@ -1436,7 +1479,13 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
                 for (int i = head_node + 1; i < hi->doc->node_count - 1; ++i) {
                     hi->doc->nodes[i].nesting_level += 1;
                 }
+                while (unclosed_elements[unclosed_elements_size - 1] != head_node) {
+                    unclosed_elements_size -= 1;
+                }
+                unclosed_elements_size -= 1;
             }
+            unclosed_elements[unclosed_elements_size] = body_node;
+            INCREMENT_UNCLOSED_ELEMENTS_SIZE();
         }
         if (type == NODE_TYPE_CDATA || !has_only_whitespace || body_node != -1) {
             hi->doc->nodes[hi->doc->node_count] = (struct Node) {
@@ -1449,6 +1498,22 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
         }
         html += text_node_length;
     }
+
+    // Next we close all unclosed elements
+
+    struct Node *node = &hi->doc->nodes[hi->doc->node_count - 1];
+    while (unclosed_elements_size > 0) {
+        if (node == &hi->doc->nodes[unclosed_elements[unclosed_elements_size - 1]]) {
+            node->type = NODE_TYPE_NONVOID_ELEMENT;
+            unclosed_elements_size -= 1;
+        }
+        node->nesting_level += unclosed_elements_size;
+        node -= 1;
+    }
+
+    // Next we realloc the data structures
+
+    free(unclosed_elements);
 
     if (attributes_count == 0) {
         free(hi->doc->attributes);
@@ -1464,26 +1529,6 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
             return NULL;
         }
         hi->doc->attributes = new_attributes;
-    }
-
-    if (hi->doc->node_count == 0) {
-        free(hi->doc->nodes);
-        hi->doc->nodes = NULL;
-        return hi;
-    }
-
-    // Next we close all unclosed elements
-
-    for (int i = 1; i < hi->doc->node_count; ++i) {
-        if (hi->doc->nodes[i].type != NODE_TYPE_UNCLOSED_ELEMENT) {
-            continue;
-        }
-        hi->doc->nodes[i].type = NODE_TYPE_NONVOID_ELEMENT;
-        for (int k = i + 1; k < hi->doc->node_count &&
-            hi->doc->nodes[k].nesting_level >= hi->doc->nodes[i].nesting_level; ++k)
-        {
-            hi->doc->nodes[k].nesting_level += 1;
-        }
     }
 
     struct Node *new_nodes = realloc(hi->doc->nodes, hi->doc->node_count * sizeof (struct Node));
