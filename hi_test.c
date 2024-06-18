@@ -266,24 +266,23 @@ void test_outer_html()
         const char *input;
         const char *outer_html;
     } test_cases[] = {
+        {"<ul><li>1</li><li><ul><li>2</li></ul></li></ul>", ""},
+        {"<body a='<>&quot;'>&auml;&gt;&lt;&quot;&z", "<html><head></head><body a=\"<>&quot;\">ä&gt;&lt;\"&amp;z</body></html>"},
+        {"<HTML LANG=en><META></HTML>", "<html lang=\"en\"><head><meta></head></html>"},
         {"<!----><title>t", "<!----><html><head><title>t</title></head></html>"},
-        {"<html><!---->a</html>", "<html><!----></html>"},
-        /*
+        {"<html><!----></html>", "<html><!----></html>"},
         {"<html><head>a</head><body></body></html>", "<html><head></head><body>a</body></html>"},
         {"<head>a</head><body></body>", "<html><head></head><body>a</body></html>"},
         {"<head>a<body>b", "<html><head></head><body>ab</body></html>"}, // TODO We get 2 text nodes here
         {"<body>a<body b=c>", "<html><head></head><body b=\"c\">a</body></html>"},
         {"<head>a</head>", "<html><head></head><body>a</body></html>"},
-        {"<HTML LANG=en><META></HTML>", "<html lang=\"en\"><head><meta></head></html>"},
         {"<head><meta><body>", "<html><head><meta></head><body></body></html>"},
         {"<p>p<div>div</div></p>", "<html><head></head><body><p>p</p><div>div</div></body></html>"},
         {"<table><tr><td>a", "<html><head></head><body><table><tbody><tr><td>a</td></tr></tbody></table></body></html>"},
-        {"<body a='<>&quot;'>&auml;&gt;&lt;&quot;&z", "<html><head></head><body a=\"<>&quot;\">ä&gt;&lt;\"&amp;z</body></html>"},
         {"b</stray>c", "<html><body>bc</body></html>"},
         {" <!--a-->b", "<!--a--><html><body>b</body></html>"},
         {"<script><a>&auml;", "<html><head><script><a>&auml;</script></head></html>"},
         {"<title>a", "<html><head><title>a</title></head></html>"},
-        */
     };
     for (int i = 0; i < sizeof test_cases / sizeof *test_cases; ++i) {
         struct HtmlInspector *hi = HtmlInspector(test_cases[i].input);
