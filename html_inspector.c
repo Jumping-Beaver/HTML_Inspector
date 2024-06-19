@@ -389,16 +389,6 @@ static const char CHARMASK_TAG_NAME_END[256] = {
     [ '>'] = 1
 };
 
-static const struct {
-    const char *data;
-    char length;
-} CDATA_TAGS[] = {
-    {"style", sizeof "style" - 1},
-    {"title", sizeof "title" - 1},
-    {"script", sizeof "script" - 1},
-    {"textarea", sizeof "textarea" - 1},
-};
-
 struct String {
     unsigned char *data;
     size_t length;
@@ -716,44 +706,6 @@ struct HtmlInspector {
         };
         enum SelectorItemType type;
     } selector_items[228];
-
-    /*
-    unsigned int active_axis;
-    struct Filter {
-        const void *arg1;
-        const void *arg2;
-        enum {
-            FILTER_OR,
-            FILTER_NOT,
-            FILTER_AND,
-            FILTER_CASE_I,
-            FILTER_NTH,
-            FILTER_NODE_NAME,
-            FILTER_ATTRIBUTE_EXISTS,
-            FILTER_ATTRIBUTE_EQUALS,
-            FILTER_ATTRIBUTE_EQUALS_I,
-            FILTER_ATTRIBUTE_CONTAINS,
-            FILTER_ATTRIBUTE_CONTAINS_I,
-            FILTER_ATTRIBUTE_CONTAINS_WORD,
-            FILTER_ATTRIBUTE_CONTAINS_WORD_I,
-            FILTER_ATTRIBUTE_STARTS_WITH,
-            FILTER_ATTRIBUTE_STARTS_WITH_I,
-        } type;
-    } filters[128];
-    struct Axis {
-        signed int position;
-        unsigned int axis_n;
-        unsigned short filter_start;
-        unsigned short filter_count;
-        enum {
-            AXIS_CHILD,
-            AXIS_ANCESTOR,
-            AXIS_DESCENDANT,
-            AXIS_FOLLOWING_SIBLING,
-            AXIS_PRECEDING_SIBLING,
-        } type;
-    } axes[128];
-    */
     char selector_item_count;
     bool must_iterate;
 };
@@ -814,6 +766,8 @@ static bool parse_attribute(struct Attribute *attribute, const unsigned char **h
     return true;
 }
 
+#define CHARSEQICMP(s1, length, s2) (length != sizeof s2 - 1 || strnicmp(s1, s2, length))
+
 struct String HtmlInspector_extract_charset(const unsigned char *html)
 {
     struct Attribute attribute;
@@ -835,18 +789,24 @@ struct String HtmlInspector_extract_charset(const unsigned char *html)
             }
         }
         if (*html == '<') {
-            for (int i = 0; i < sizeof CDATA_TAGS / sizeof *CDATA_TAGS; ++i) {
-                if (strnicmp(html, CDATA_TAGS[i].data, CDATA_TAGS[i].length) ||
-                    CHARMASK_TAG_NAME_END[html[CDATA_TAGS[i].length + 1]])
-                {
-                    continue;
-                }
-                html += CDATA_TAGS[i].length;
+            html += 1;
+            const char *name_start = html;
+            int name_length = 0;
+            while (CHARMASK_TAG_NAME_END[html[name_length]] == 0) {
+                name_length += 1;
+            }
+            if (
+                !CHARSEQICMP(name_start, name_length, "script") ||
+                !CHARSEQICMP(name_start, name_length, "style") ||
+                !CHARSEQICMP(name_start, name_length, "title") ||
+                !CHARSEQICMP(name_start, name_length, "textarea")
+            ) {
+                html += name_length;
                 do {
                     html += 1;
                 } while (
                     *html != '\0' && (*html != '<' || *(html + 1) != '/' ||
-                    strnicmp(&html[2], CDATA_TAGS[i].data, CDATA_TAGS[i].length))
+                    strnicmp(&html[2], name_start, name_length))
                 );
             }
         }
@@ -951,8 +911,6 @@ void HtmlInspector_free(struct HtmlInspector *hi)
     }
     free(hi);
 }
-
-#define CHARSEQICMP(s1, length, s2) (length != sizeof s2 - 1 || strnicmp(s1, s2, length))
 
 static struct HtmlInspector * HtmlInspector(const unsigned char *html)
 {
@@ -1420,19 +1378,18 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
         bool has_only_whitespace = true;
         enum NodeType type = NODE_TYPE_TEXT;
 
-        for (int i = 0; i < sizeof CDATA_TAGS / sizeof *CDATA_TAGS; ++i) {
-            if (
-                hi->doc->nodes[hi->doc->node_count - 1].name_length != CDATA_TAGS[i].length ||
-                strnicmp(hi->doc->nodes[hi->doc->node_count - 1].name_start, CDATA_TAGS[i].data,
-                    CDATA_TAGS[i].length)
-            ) {
-                continue;
-            }
+        struct Node *node = &hi->doc->nodes[hi->doc->node_count - 1];
+        if (
+            !CHARSEQICMP(node->name_start, node->name_length, "script") ||
+            !CHARSEQICMP(node->name_start, node->name_length, "style") ||
+            !CHARSEQICMP(node->name_start, node->name_length, "title") ||
+            !CHARSEQICMP(node->name_start, node->name_length, "textarea")
+        ) {
             type = NODE_TYPE_CDATA;
             while (html[text_node_length] != '\0') {
                 text_node_length += 1;
                 if (html[text_node_length] == '<' && html[text_node_length + 1] == '/' &&
-                    !strnicmp(&html[text_node_length + 2], CDATA_TAGS[i].data, CDATA_TAGS[i].length))
+                    !strnicmp(&html[text_node_length + 2], node->name_start, node->name_length))
                 {
                     break;
                 }

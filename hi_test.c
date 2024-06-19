@@ -57,8 +57,7 @@ void HtmlInspector_print_stats(struct HtmlInspector *hi)
     printf("Size of data structures: %d bytes\n", memory);
 }
 
-char *
-read_test_file()
+char * read_test_file()
 {
     FILE *file = fopen("test-html.html", "r");
     fseek(file, 0, SEEK_END);
@@ -68,17 +67,6 @@ read_test_file()
     fread(html, sizeof (char), file_size, file);
     fclose(file);
     return html;
-}
-
-void test_dump()
-{
-    unsigned char html[] = "text <ul><li>eins<li>zwei<li>drei</ul>";
-    struct HtmlInspector *hi = HtmlInspector(html);
-    if (hi == NULL) {
-        return;
-    }
-    HtmlInspector_dump(hi);
-    return;
 }
 
 void test_charset()
@@ -302,17 +290,6 @@ void test_outer_html()
 
 int main()
 {
-    /*struct HtmlInspector *hi = HtmlInspector("<html><body><b>a</b></body></html>");
-    HtmlInspector_child(hi);
-    HtmlInspector_nth(hi, 1);
-    HtmlInspector_child(hi);
-    HtmlInspector_nth(hi, 2);
-    while (HtmlInspector_iterate(hi)) {
-        struct String name = HtmlInspector_get_name(hi);
-        printf("%.*s\n", name.length, name.data);
-        string_free(name);
-    }
-    */
     //test_outer_html();
     benchmark_loading();
     //benchmark_resolve_url();
