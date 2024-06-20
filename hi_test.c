@@ -5,10 +5,10 @@
 #include <string.h>
 #include "html_inspector.c"
 
-void HtmlInspector_dump(struct HtmlInspector *hi)
+void HtmlDocument_dump(struct HtmlDocument *doc)
 {
-    struct Node *node = &hi->doc->nodes[0];
-    while (node < &hi->doc->nodes[hi->doc->node_count]) {
+    struct Node *node = doc->nodes;
+    while (node < &doc->nodes[doc->node_count]) {
         for (int k = 0; k < node->nesting_level; ++k) {
             putc(' ', stdout);
         }
@@ -24,8 +24,8 @@ void HtmlInspector_dump(struct HtmlInspector *hi)
             node->type == NODE_TYPE_TEXT ? "text" : "?",
             node->name_length, node->name_start
         );
-        struct Attribute *attribute = &hi->doc->attributes[node->attributes_start];
-        while (attribute < &hi->doc->attributes[node->attributes_start + node->attributes_count]) {
+        struct Attribute *attribute = &doc->attributes[node->attributes_start];
+        while (attribute < &doc->attributes[node->attributes_start + node->attributes_count]) {
             printf(
                 ", %.*s=%.*s",
                 attribute->name_length, attribute->name_start,
@@ -37,23 +37,23 @@ void HtmlInspector_dump(struct HtmlInspector *hi)
         node += 1;
     }
 }
-void HtmlInspector_print_stats(struct HtmlInspector *hi)
+void HtmlDocument_print_stats(struct HtmlDocument *doc)
 {
     int attributes_count = 0;
     int max_nesting_level = 0;
-    for (int i = 0; i < hi->doc->node_count; ++i) {
-        attributes_count += hi->doc->nodes[i].attributes_count;
-        if (hi->doc->nodes[i].nesting_level > max_nesting_level) {
-            max_nesting_level = hi->doc->nodes[i].nesting_level;
+    for (int i = 0; i < doc->node_count; ++i) {
+        attributes_count += doc->nodes[i].attributes_count;
+        if (doc->nodes[i].nesting_level > max_nesting_level) {
+            max_nesting_level = doc->nodes[i].nesting_level;
         }
     }
-    int memory = hi->doc->node_count * sizeof (struct Node) + attributes_count * sizeof (struct Attribute);
+    int memory = doc->node_count * sizeof (struct Node) + attributes_count * sizeof (struct Attribute);
     printf("Maximum nesting level: %d\n", max_nesting_level);
-    printf("Number of nodes: %d\n", hi->doc->node_count);
+    printf("Number of nodes: %d\n", doc->node_count);
     printf("Number of attributes: %d\n", attributes_count);
-    printf("Number of attributes / number of nodes: %.2f\n", (float) attributes_count / hi->doc->node_count);
-    printf("Input length: %zu bytes\n", strlen(hi->doc->html));
-    printf("Input length / number of nodes: %.2f\n", (float) strlen(hi->doc->html) / hi->doc->node_count);
+    printf("Number of attributes / number of nodes: %.2f\n", (float) attributes_count / doc->node_count);
+    printf("Input length: %zu bytes\n", strlen(doc->html));
+    printf("Input length / number of nodes: %.2f\n", (float) strlen(doc->html) / doc->node_count);
     printf("Size of data structures: %d bytes\n", memory);
 }
 
@@ -72,7 +72,7 @@ char * read_test_file()
 void test_charset()
 {
     unsigned char html[] = "<meta content = 'text/html; charset=&quot;iso-8859-1\"' http-equiv='CONtent-typ&#69;'>";
-    struct String charset = HtmlInspector_extract_charset(html);
+    struct String charset = HtmlDocument_extract_charset(html);
     if (charset.data == NULL) {
         printf("The document has no meta charset\n");
         return;
@@ -85,17 +85,17 @@ void benchmark_loading()
     char *html = read_test_file();
     int i;
     struct timespec start, end;
-    struct HtmlInspector *hi;
-    hi = HtmlInspector(html);
-    //HtmlInspector_print_stats(hi);
-    //HtmlInspector_dump(hi); return;
+    struct HtmlDocument *hi;
+    hi = HtmlDocument(html);
+    //HtmlDocument_print_stats(hi);
+    //HtmlDocument_dump(hi); return;
     clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &start);
     for (i = 0; i < 200; ++i) {
-        hi = HtmlInspector(html);
+        hi = HtmlDocument(html);
         if (hi == NULL) {
             continue;
         }
-        HtmlInspector_free(hi);
+        HtmlDocument_free(hi);
     }
     clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &end);
 
@@ -205,11 +205,11 @@ void test_entities_to_utf8()
         "&beta; &gamma; &delta; [&#x3a9;]</stray>u&invalid;entity";
     for (int i = 0; i < 100000; ++i) {
         struct String string = STRING(cstring);
-        HtmlInspector_entities_to_utf8(&string, true);
+        HtmlDocument_entities_to_utf8(&string, true);
         string_free(string);
     }
     struct String string = STRING(cstring);
-    HtmlInspector_entities_to_utf8(&string, true);
+    HtmlDocument_entities_to_utf8(&string, true);
     printf("%.*s", string.length, string.data);
     string_free(string);
 }
@@ -217,7 +217,7 @@ void test_entities_to_utf8()
 void test_normalize_space()
 {
     struct String string = STRING("    asldkfas\n\nl  \r  dk→ø↓ſ€¶fjöasldfjö a         ");
-    HtmlInspector_normalize_space(&string);
+    HtmlDocument_normalize_space(&string);
     printf("%.*s", string.length, string.data);
     string_free(string);
 }
@@ -225,25 +225,28 @@ void test_normalize_space()
 void test_get_hrefs()
 {
     char *html = read_test_file();
-    struct HtmlInspector *hi = HtmlInspector(html);
-    HtmlInspector_descendant(hi);
-    HtmlInspector_name(hi, "a");
-    HtmlInspector_attribute_equals(hi, "href", "#");
-    HtmlInspector_not(hi);
-    HtmlInspector_attribute_starts_with(hi, "href", "javascript:");
-    HtmlInspector_not(hi);
+    struct HtmlDocument *doc = HtmlDocument(html);
+    struct Selector *s = HtmlDocument_select(doc, 0);
+    Selector_descendant(s);
+    Selector_name(s, "a");
+    Selector_attribute_equals(s, "href", "#");
+    Selector_not(s);
+    Selector_attribute_starts_with(s, "href", "javascript:");
+    Selector_not(s);
     int count = 0;
-    while (HtmlInspector_iterate(hi)) {
-        struct String href = HtmlInspector_get_attribute(hi, "href");
-        struct String uri = href;// HtmlInspector_resolve_iri_to_uri(href, STRING("http://example.org"));
-        //struct String href = HtmlInspector_get_name(hi);
+    int node;
+    while ((node = Selector_iterate(s)) != -1) {
+        struct String href = HtmlDocument_get_attribute(doc, node, "href");
+        struct String uri = href;// HtmlDocument_resolve_iri_to_uri(href, STRING("http://example.org"));
+        //struct String href = HtmlDocument_get_name(doc);
         printf("%.*s\n", uri.length, uri.data);
         string_free(href);
         count += 1;
         //string_free(uri);
     }
     printf("Extracted %d links\n", count);
-    HtmlInspector_free(hi);
+    HtmlDocument_free(doc);
+    Selector_free(s);
     free(html);
 }
 
@@ -273,25 +276,25 @@ void test_outer_html()
         {"<title>a", "<html><head><title>a</title></head></html>"},
     };
     for (int i = 0; i < sizeof test_cases / sizeof *test_cases; ++i) {
-        struct HtmlInspector *hi = HtmlInspector(test_cases[i].input);
-        if (hi == NULL) {
+        struct HtmlDocument *doc = HtmlDocument(test_cases[i].input);
+        if (doc == NULL) {
             printf("OOM\n");
             continue;
         }
-        struct String outer_html = HtmlInspector_get_outer_html(hi);
+        struct String outer_html = HtmlDocument_get_outer_html(doc, 0);
         if (strncmp(test_cases[i].outer_html, outer_html.data, outer_html.length)) {
             printf("Input: %s\nExpected output:\n%s\nActual output:\n%.*s\n\n",
                    test_cases[i].input, test_cases[i].outer_html, outer_html.length, outer_html.data);
-            HtmlInspector_dump(hi);
+            HtmlDocument_dump(doc);
         }
-        HtmlInspector_free(hi);
+        HtmlDocument_free(doc);
     }
 }
 
 int main()
 {
-    //test_outer_html();
-    benchmark_loading();
+    test_outer_html();
+    //benchmark_loading();
     //benchmark_resolve_url();
     //test_url_join();
     //test_entities_to_utf8();

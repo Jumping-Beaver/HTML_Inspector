@@ -2,16 +2,25 @@
 #include "html_inspector.c"
 
 static zend_class_entry *class_entry_html_inspector;
+static zend_class_entry *class_entry_selector;
 
 struct html_inspector_object {
-    struct HtmlInspector *hi;
+    struct HtmlDocument *hi;
+    zend_object std;
+};
+
+struct selector_object {
+    struct Selector *s;
     zend_object std;
 };
 
 #define HTML_INSPECTOR(this) \
     ((struct html_inspector_object *) ((char *) Z_OBJ_P(this) - offsetof(struct html_inspector_object, std)))->hi
 
-ZEND_METHOD(HtmlInspector, resolve_iri_to_uri)
+#define SELECTOR(this) \
+    ((struct selector_object *) ((char *) Z_OBJ_P(this) - offsetof(struct selector_object, std)))->s
+
+ZEND_METHOD(HtmlDocument, resolve_iri_to_uri)
 {
     zend_string *reference;
     zend_string *base;
@@ -31,7 +40,7 @@ ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO(arginfo_resolve_iri_to_uri, IS_STRING, fals
     ZEND_ARG_TYPE_INFO(0, base, IS_STRING, false)
 ZEND_END_ARG_INFO()
 
-ZEND_METHOD(HtmlInspector, entities_to_utf8)
+ZEND_METHOD(HtmlDocument, entities_to_utf8)
 {
     zend_string *html;
     ZEND_PARSE_PARAMETERS_START(1, 1)
@@ -39,7 +48,7 @@ ZEND_METHOD(HtmlInspector, entities_to_utf8)
     ZEND_PARSE_PARAMETERS_END();
 
     struct String string = {ZSTR_VAL(html), ZSTR_LEN(html), false};
-    HtmlInspector_entities_to_utf8(&string, false);
+    HtmlDocument_entities_to_utf8(&string, false);
     ZVAL_STRINGL(return_value, string.data, string.length);
     string_free(string);
 }
@@ -47,7 +56,7 @@ ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO(arginfo_entities_to_utf8, IS_STRING, false)
     ZEND_ARG_TYPE_INFO(0, html, IS_STRING, false)
 ZEND_END_ARG_INFO()
 
-ZEND_METHOD(HtmlInspector, normalize_space)
+ZEND_METHOD(HtmlDocument, normalize_space)
 {
     zend_string *html;
     ZEND_PARSE_PARAMETERS_START(1, 1)
@@ -55,7 +64,7 @@ ZEND_METHOD(HtmlInspector, normalize_space)
     ZEND_PARSE_PARAMETERS_END();
 
     struct String string = {ZSTR_VAL(html), ZSTR_LEN(html), false};
-    HtmlInspector_normalize_space(&string);
+    HtmlDocument_normalize_space(&string);
     ZVAL_STRINGL(return_value, string.data, string.length);
     string_free(string);
 }
@@ -63,14 +72,14 @@ ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO(arginfo_normalize_space, IS_STRING, true)
     ZEND_ARG_TYPE_INFO(0, html, IS_STRING, false)
 ZEND_END_ARG_INFO()
 
-ZEND_METHOD(HtmlInspector, extract_charset)
+ZEND_METHOD(HtmlDocument, extract_charset)
 {
     zend_string *html;
     ZEND_PARSE_PARAMETERS_START(1, 1)
         Z_PARAM_STR(html)
     ZEND_PARSE_PARAMETERS_END();
 
-    struct String charset = HtmlInspector_extract_charset(ZSTR_VAL(html));
+    struct String charset = HtmlDocument_extract_charset(ZSTR_VAL(html));
     if (charset.data == NULL) {
         ZVAL_NULL(return_value);
         return;
@@ -82,13 +91,13 @@ ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO(arginfo_extract_charset, IS_STRING, true)
     ZEND_ARG_TYPE_INFO(0, html, IS_STRING, false)
 ZEND_END_ARG_INFO()
 
-ZEND_METHOD(HtmlInspector, __construct)
+ZEND_METHOD(HtmlDocument, __construct)
 {
     zend_string *html;
     ZEND_PARSE_PARAMETERS_START(1, 1)
         Z_PARAM_STR(html)
     ZEND_PARSE_PARAMETERS_END();
-    HTML_INSPECTOR(ZEND_THIS) = HtmlInspector(ZSTR_VAL(html));
+    HTML_INSPECTOR(ZEND_THIS) = HtmlDocument(ZSTR_VAL(html));
     if (HTML_INSPECTOR(ZEND_THIS) == NULL) {
         zend_throw_error(NULL, "malloc failed", 0);
     }
@@ -97,154 +106,124 @@ ZEND_BEGIN_ARG_INFO(arginfo___construct, 0)
     ZEND_ARG_TYPE_INFO(0, html, IS_STRING, false)
 ZEND_END_ARG_INFO()
 
-ZEND_METHOD(HtmlInspector, __destruct)
+ZEND_METHOD(HtmlDocument, __destruct)
 {
     ZEND_PARSE_PARAMETERS_NONE();
-    //HtmlInspector_free(HTML_INSPECTOR(ZEND_THIS));
+    HtmlDocument_free(HTML_INSPECTOR(ZEND_THIS));
 }
 ZEND_BEGIN_ARG_INFO(arginfo___destruct, 0)
 ZEND_END_ARG_INFO()
 
-ZEND_METHOD(HtmlInspector, fork)
+ZEND_METHOD(Selector, iterate)
 {
-    /*ZEND_PARSE_PARAMETERS_NONE();
-    struct HtmlInspector *hi = HtmlInspector("HTML_INSPECTOR(ZEND_THIS)");
-    if (hi == NULL) {
-        zend_throw_error(NULL, "malloc failed", 0);
-        return;
-    }
-	struct html_inspector_object *intern = ecalloc(1, sizeof(struct html_inspector_object) + zend_object_properties_size(class_entry_html_inspector));
-	intern->hi = hi;
-
-	zend_object_std_init(&intern->std, class_entry_html_inspector);
-	object_properties_init(&intern->std, class_entry_html_inspector);
-
-    ZVAL_OBJ(return_value, &intern->std);
-    */
-
     ZEND_PARSE_PARAMETERS_NONE();
-    struct HtmlInspector *hi = HtmlInspector_fork(HTML_INSPECTOR(ZEND_THIS));
-    if (hi == NULL) {
-        zend_throw_error(NULL, "malloc failed", 0);
-        return;
-    }
-    ZVAL_OBJ_COPY(return_value, zend_objects_new(class_entry_html_inspector));
-    HTML_INSPECTOR(return_value) = hi;
+    ZVAL_LONG(return_value, Selector_iterate(SELECTOR(ZEND_THIS)));
 }
-ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_fork, HtmlInspector, false)
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO(arginfo_iterate, IS_LONG, false)
 ZEND_END_ARG_INFO()
 
-ZEND_METHOD(HtmlInspector, reset)
+ZEND_METHOD(Selector, rewind)
 {
     ZEND_PARSE_PARAMETERS_NONE();
-    HtmlInspector_reset(HTML_INSPECTOR(ZEND_THIS));
+    Selector_rewind(SELECTOR(ZEND_THIS));
     ZVAL_OBJ_COPY(return_value, Z_OBJ_P(ZEND_THIS));
 }
-ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_reset, HtmlInspector, false)
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_rewind, HtmlDocument, false)
 ZEND_END_ARG_INFO()
 
-ZEND_METHOD(HtmlInspector, iterate)
+ZEND_METHOD(Selector, __destruct)
 {
     ZEND_PARSE_PARAMETERS_NONE();
-    ZVAL_BOOL(return_value, HtmlInspector_iterate(HTML_INSPECTOR(ZEND_THIS)));
+    Selector_free(SELECTOR(ZEND_THIS));
 }
-ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO(arginfo_iterate, _IS_BOOL, false)
+ZEND_BEGIN_ARG_INFO(arginfo_selector__destruct, 0)
 ZEND_END_ARG_INFO()
 
-ZEND_METHOD(HtmlInspector, rewind)
-{
-    ZEND_PARSE_PARAMETERS_NONE();
-    HtmlInspector_rewind(HTML_INSPECTOR(ZEND_THIS));
-    ZVAL_OBJ_COPY(return_value, Z_OBJ_P(ZEND_THIS));
-}
-ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_rewind, HtmlInspector, false)
-ZEND_END_ARG_INFO()
-
-ZEND_METHOD(HtmlInspector, nth)
+ZEND_METHOD(Selector, nth)
 {
     zend_long n;
     ZEND_PARSE_PARAMETERS_START(1, 1);
         Z_PARAM_LONG(n)
     ZEND_PARSE_PARAMETERS_END();
-    HtmlInspector_nth(HTML_INSPECTOR(ZEND_THIS), n);
+    Selector_nth(SELECTOR(ZEND_THIS), n);
     ZVAL_OBJ_COPY(return_value, Z_OBJ_P(ZEND_THIS));
 }
-ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_nth, HtmlInspector, false)
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_nth, HtmlDocument, false)
     ZEND_ARG_TYPE_INFO(0, n, IS_LONG, false)
 ZEND_END_ARG_INFO()
 
-ZEND_METHOD(HtmlInspector, child)
-{
-    ZEND_PARSE_PARAMETERS_NONE();
-    HtmlInspector_child(HTML_INSPECTOR(ZEND_THIS));
-    ZVAL_OBJ_COPY(return_value, Z_OBJ_P(ZEND_THIS));
-}
-ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_child, HtmlInspector, false)
-ZEND_END_ARG_INFO()
-
-ZEND_METHOD(HtmlInspector, descendant)
-{
-    ZEND_PARSE_PARAMETERS_NONE();
-    HtmlInspector_descendant(HTML_INSPECTOR(ZEND_THIS));
-    ZVAL_OBJ_COPY(return_value, Z_OBJ_P(ZEND_THIS));
-}
-ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_descendant, HtmlInspector, false)
-ZEND_END_ARG_INFO()
-
-ZEND_METHOD(HtmlInspector, ancestor)
-{
-    ZEND_PARSE_PARAMETERS_NONE();
-    HtmlInspector_ancestor(HTML_INSPECTOR(ZEND_THIS));
-    ZVAL_OBJ_COPY(return_value, Z_OBJ_P(ZEND_THIS));
-}
-ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_ancestor, HtmlInspector, false)
-ZEND_END_ARG_INFO()
-
-ZEND_METHOD(HtmlInspector, preceding_sibling)
-{
-    ZEND_PARSE_PARAMETERS_NONE();
-    HtmlInspector_preceding_sibling(HTML_INSPECTOR(ZEND_THIS));
-    ZVAL_OBJ_COPY(return_value, Z_OBJ_P(ZEND_THIS));
-}
-ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_preceding_sibling, HtmlInspector, false)
-ZEND_END_ARG_INFO()
-
-ZEND_METHOD(HtmlInspector, following_sibling)
-{
-    ZEND_PARSE_PARAMETERS_NONE();
-    HtmlInspector_following_sibling(HTML_INSPECTOR(ZEND_THIS));
-    ZVAL_OBJ_COPY(return_value, Z_OBJ_P(ZEND_THIS));
-}
-ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_following_sibling, HtmlInspector, false)
-ZEND_END_ARG_INFO()
-
-ZEND_METHOD(HtmlInspector, name)
+ZEND_METHOD(Selector, name)
 {
     zend_string *name;
     ZEND_PARSE_PARAMETERS_START(1, 1)
         Z_PARAM_STR(name)
     ZEND_PARSE_PARAMETERS_END();
-    HtmlInspector_name(HTML_INSPECTOR(ZEND_THIS), ZSTR_VAL(name));
+    Selector_name(SELECTOR(ZEND_THIS), ZSTR_VAL(name));
     ZVAL_OBJ_COPY(return_value, Z_OBJ_P(ZEND_THIS));
 }
-ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_name, HtmlInspector, false)
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_name, HtmlDocument, false)
     ZEND_ARG_TYPE_INFO(0, name, IS_STRING, false)
 ZEND_END_ARG_INFO()
 
-ZEND_METHOD(HtmlInspector, attribute_exists)
+ZEND_METHOD(Selector, child)
+{
+    ZEND_PARSE_PARAMETERS_NONE();
+    Selector_child(SELECTOR(ZEND_THIS));
+    ZVAL_OBJ_COPY(return_value, Z_OBJ_P(ZEND_THIS));
+}
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_child, HtmlDocument, false)
+ZEND_END_ARG_INFO()
+
+ZEND_METHOD(Selector, descendant)
+{
+    ZEND_PARSE_PARAMETERS_NONE();
+    Selector_descendant(SELECTOR(ZEND_THIS));
+    ZVAL_OBJ_COPY(return_value, Z_OBJ_P(ZEND_THIS));
+}
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_descendant, HtmlDocument, false)
+ZEND_END_ARG_INFO()
+
+ZEND_METHOD(Selector, ancestor)
+{
+    ZEND_PARSE_PARAMETERS_NONE();
+    Selector_ancestor(SELECTOR(ZEND_THIS));
+    ZVAL_OBJ_COPY(return_value, Z_OBJ_P(ZEND_THIS));
+}
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_ancestor, HtmlDocument, false)
+ZEND_END_ARG_INFO()
+
+ZEND_METHOD(Selector, preceding_sibling)
+{
+    ZEND_PARSE_PARAMETERS_NONE();
+    Selector_preceding_sibling(SELECTOR(ZEND_THIS));
+    ZVAL_OBJ_COPY(return_value, Z_OBJ_P(ZEND_THIS));
+}
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_preceding_sibling, HtmlDocument, false)
+ZEND_END_ARG_INFO()
+
+ZEND_METHOD(Selector, following_sibling)
+{
+    ZEND_PARSE_PARAMETERS_NONE();
+    Selector_following_sibling(SELECTOR(ZEND_THIS));
+    ZVAL_OBJ_COPY(return_value, Z_OBJ_P(ZEND_THIS));
+}
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_following_sibling, HtmlDocument, false)
+ZEND_END_ARG_INFO()
+
+ZEND_METHOD(Selector, attribute_exists)
 {
     zend_string *name;
     ZEND_PARSE_PARAMETERS_START(1, 1)
         Z_PARAM_STR(name)
     ZEND_PARSE_PARAMETERS_END();
-    HtmlInspector_attribute_exists(HTML_INSPECTOR(ZEND_THIS), ZSTR_VAL(name));
+    Selector_attribute_exists(SELECTOR(ZEND_THIS), ZSTR_VAL(name));
     ZVAL_OBJ_COPY(return_value, Z_OBJ_P(ZEND_THIS));
 }
-ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_attribute_exists, HtmlInspector, false)
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_attribute_exists, HtmlDocument, false)
     ZEND_ARG_TYPE_INFO(0, name, IS_STRING, false)
 ZEND_END_ARG_INFO()
 
-ZEND_METHOD(HtmlInspector, attribute_equals)
+ZEND_METHOD(Selector, attribute_equals)
 {
     zend_string *name;
     zend_string *value;
@@ -252,15 +231,15 @@ ZEND_METHOD(HtmlInspector, attribute_equals)
         Z_PARAM_STR(name)
         Z_PARAM_STR(value)
     ZEND_PARSE_PARAMETERS_END();
-    HtmlInspector_attribute_equals(HTML_INSPECTOR(ZEND_THIS), ZSTR_VAL(name), ZSTR_VAL(value));
+    Selector_attribute_equals(SELECTOR(ZEND_THIS), ZSTR_VAL(name), ZSTR_VAL(value));
     ZVAL_OBJ_COPY(return_value, Z_OBJ_P(ZEND_THIS));
 }
-ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_attribute_equals, HtmlInspector, false)
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_attribute_equals, HtmlDocument, false)
     ZEND_ARG_TYPE_INFO(0, name, IS_STRING, false)
     ZEND_ARG_TYPE_INFO(0, value, IS_STRING, false)
 ZEND_END_ARG_INFO()
 
-ZEND_METHOD(HtmlInspector, attribute_contains)
+ZEND_METHOD(Selector, attribute_contains)
 {
     zend_string *name;
     zend_string *value;
@@ -268,15 +247,15 @@ ZEND_METHOD(HtmlInspector, attribute_contains)
         Z_PARAM_STR(name)
         Z_PARAM_STR(value)
     ZEND_PARSE_PARAMETERS_END();
-    HtmlInspector_attribute_contains(HTML_INSPECTOR(ZEND_THIS), ZSTR_VAL(name), ZSTR_VAL(value));
+    Selector_attribute_contains(SELECTOR(ZEND_THIS), ZSTR_VAL(name), ZSTR_VAL(value));
     ZVAL_OBJ_COPY(return_value, Z_OBJ_P(ZEND_THIS));
 }
-ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_attribute_contains, HtmlInspector, false)
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_attribute_contains, HtmlDocument, false)
     ZEND_ARG_TYPE_INFO(0, name, IS_STRING, false)
     ZEND_ARG_TYPE_INFO(0, value, IS_STRING, false)
 ZEND_END_ARG_INFO()
 
-ZEND_METHOD(HtmlInspector, attribute_starts_with)
+ZEND_METHOD(Selector, attribute_starts_with)
 {
     zend_string *name;
     zend_string *value;
@@ -284,55 +263,57 @@ ZEND_METHOD(HtmlInspector, attribute_starts_with)
         Z_PARAM_STR(name)
         Z_PARAM_STR(value)
     ZEND_PARSE_PARAMETERS_END();
-    HtmlInspector_attribute_starts_with(HTML_INSPECTOR(ZEND_THIS), ZSTR_VAL(name), ZSTR_VAL(value));
+    Selector_attribute_starts_with(SELECTOR(ZEND_THIS), ZSTR_VAL(name), ZSTR_VAL(value));
     ZVAL_OBJ_COPY(return_value, Z_OBJ_P(ZEND_THIS));
 }
-ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_attribute_starts_with, HtmlInspector, false)
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_attribute_starts_with, HtmlDocument, false)
     ZEND_ARG_TYPE_INFO(0, name, IS_STRING, false)
     ZEND_ARG_TYPE_INFO(0, value, IS_STRING, false)
 ZEND_END_ARG_INFO()
 
-ZEND_METHOD(HtmlInspector, or)
+ZEND_METHOD(Selector, or)
 {
     ZEND_PARSE_PARAMETERS_NONE();
-    HtmlInspector_or(HTML_INSPECTOR(ZEND_THIS));
+    Selector_or(SELECTOR(ZEND_THIS));
     ZVAL_OBJ_COPY(return_value, Z_OBJ_P(ZEND_THIS));
 }
-ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_or, HtmlInspector, false)
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_or, HtmlDocument, false)
 ZEND_END_ARG_INFO()
 
-ZEND_METHOD(HtmlInspector, and)
+ZEND_METHOD(Selector, and)
 {
     ZEND_PARSE_PARAMETERS_NONE();
-    HtmlInspector_and(HTML_INSPECTOR(ZEND_THIS));
+    Selector_and(SELECTOR(ZEND_THIS));
     ZVAL_OBJ_COPY(return_value, Z_OBJ_P(ZEND_THIS));
 }
-ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_and, HtmlInspector, false)
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_and, HtmlDocument, false)
 ZEND_END_ARG_INFO()
 
-ZEND_METHOD(HtmlInspector, not)
+ZEND_METHOD(Selector, not)
 {
     ZEND_PARSE_PARAMETERS_NONE();
-    HtmlInspector_not(HTML_INSPECTOR(ZEND_THIS));
+    Selector_not(SELECTOR(ZEND_THIS));
     ZVAL_OBJ_COPY(return_value, Z_OBJ_P(ZEND_THIS));
 }
-ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_not, HtmlInspector, false)
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_not, HtmlDocument, false)
 ZEND_END_ARG_INFO()
 
-ZEND_METHOD(HtmlInspector, case_i)
+ZEND_METHOD(Selector, case_i)
 {
     ZEND_PARSE_PARAMETERS_NONE();
-    HtmlInspector_case_i(HTML_INSPECTOR(ZEND_THIS));
+    Selector_case_i(SELECTOR(ZEND_THIS));
     ZVAL_OBJ_COPY(return_value, Z_OBJ_P(ZEND_THIS));
 }
-ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_case_i, HtmlInspector, false)
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_case_i, HtmlDocument, false)
 ZEND_END_ARG_INFO()
 
-ZEND_METHOD(HtmlInspector, get_name)
+ZEND_METHOD(HtmlDocument, get_name)
 {
-    ZEND_PARSE_PARAMETERS_NONE();
-    struct HtmlInspector *hi = HTML_INSPECTOR(ZEND_THIS);
-    struct String string = HtmlInspector_get_name(hi);
+    zend_long node;
+    ZEND_PARSE_PARAMETERS_START(1, 1);
+        Z_PARAM_LONG(node)
+    ZEND_PARSE_PARAMETERS_END();
+    struct String string = HtmlDocument_get_name(HTML_INSPECTOR(ZEND_THIS), node);
     if (string.data == NULL) {
         ZVAL_NULL(return_value);
         return;
@@ -341,12 +322,16 @@ ZEND_METHOD(HtmlInspector, get_name)
     string_free(string);
 }
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO(arginfo_get_name, IS_STRING, true)
+    ZEND_ARG_TYPE_INFO(0, node, IS_LONG, false)
 ZEND_END_ARG_INFO()
 
-ZEND_METHOD(HtmlInspector, get_value)
+ZEND_METHOD(HtmlDocument, get_value)
 {
-    ZEND_PARSE_PARAMETERS_NONE();
-    struct String string = HtmlInspector_get_value(HTML_INSPECTOR(ZEND_THIS));
+    zend_long node;
+    ZEND_PARSE_PARAMETERS_START(1, 1);
+        Z_PARAM_LONG(node)
+    ZEND_PARSE_PARAMETERS_END();
+    struct String string = HtmlDocument_get_value(HTML_INSPECTOR(ZEND_THIS), node);
     if (string.data == NULL) {
         ZVAL_NULL(return_value);
         return;
@@ -355,12 +340,16 @@ ZEND_METHOD(HtmlInspector, get_value)
     string_free(string);
 }
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO(arginfo_get_value, IS_STRING, true)
+    ZEND_ARG_TYPE_INFO(0, node, IS_LONG, false)
 ZEND_END_ARG_INFO()
 
-ZEND_METHOD(HtmlInspector, get_inner_html)
+ZEND_METHOD(HtmlDocument, get_inner_html)
 {
-    ZEND_PARSE_PARAMETERS_NONE();
-    struct String string = HtmlInspector_get_inner_html(HTML_INSPECTOR(ZEND_THIS));
+    zend_long node;
+    ZEND_PARSE_PARAMETERS_START(1, 1);
+        Z_PARAM_LONG(node)
+    ZEND_PARSE_PARAMETERS_END();
+    struct String string = HtmlDocument_get_inner_html(HTML_INSPECTOR(ZEND_THIS), node);
     if (string.data == NULL) {
         ZVAL_NULL(return_value);
         return;
@@ -369,12 +358,16 @@ ZEND_METHOD(HtmlInspector, get_inner_html)
     string_free(string);
 }
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO(arginfo_get_inner_html, IS_STRING, true)
+    ZEND_ARG_TYPE_INFO(0, node, IS_LONG, false)
 ZEND_END_ARG_INFO()
 
-ZEND_METHOD(HtmlInspector, get_outer_html)
+ZEND_METHOD(HtmlDocument, get_outer_html)
 {
-    ZEND_PARSE_PARAMETERS_NONE();
-    struct String string = HtmlInspector_get_outer_html(HTML_INSPECTOR(ZEND_THIS));
+    zend_long node;
+    ZEND_PARSE_PARAMETERS_START(1, 1);
+        Z_PARAM_LONG(node)
+    ZEND_PARSE_PARAMETERS_END();
+    struct String string = HtmlDocument_get_outer_html(HTML_INSPECTOR(ZEND_THIS), node);
     if (string.data == NULL) {
         ZVAL_NULL(return_value);
         return;
@@ -383,15 +376,18 @@ ZEND_METHOD(HtmlInspector, get_outer_html)
     string_free(string);
 }
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO(arginfo_get_outer_html, IS_STRING, true)
+    ZEND_ARG_TYPE_INFO(0, node, IS_LONG, false)
 ZEND_END_ARG_INFO()
 
-ZEND_METHOD(HtmlInspector, get_attribute)
+ZEND_METHOD(HtmlDocument, get_attribute)
 {
+    zend_long node;
     zend_string *attribute;
-    ZEND_PARSE_PARAMETERS_START(1, 1)
+    ZEND_PARSE_PARAMETERS_START(2, 2)
+        Z_PARAM_LONG(node)
         Z_PARAM_STR(attribute)
     ZEND_PARSE_PARAMETERS_END();
-    struct String string = HtmlInspector_get_attribute(HTML_INSPECTOR(ZEND_THIS), ZSTR_VAL(attribute));
+    struct String string = HtmlDocument_get_attribute(HTML_INSPECTOR(ZEND_THIS), node, ZSTR_VAL(attribute));
     if (string.data == NULL) {
         ZVAL_NULL(return_value);
         return;
@@ -400,97 +396,101 @@ ZEND_METHOD(HtmlInspector, get_attribute)
     string_free(string);
 }
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO(arginfo_get_attribute, IS_STRING, true)
+    ZEND_ARG_TYPE_INFO(0, node, IS_LONG, false)
     ZEND_ARG_TYPE_INFO(0, attribute, IS_STRING, false)
 ZEND_END_ARG_INFO()
 
-ZEND_METHOD(HtmlInspector, get_offset)
+ZEND_METHOD(HtmlDocument, select)
 {
-    ZEND_PARSE_PARAMETERS_NONE();
-    ZVAL_LONG(return_value, HtmlInspector_get_offset(HTML_INSPECTOR(ZEND_THIS)));
-}
-ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO(arginfo_get_offset, IS_LONG, false)
-ZEND_END_ARG_INFO()
-
-ZEND_METHOD(HtmlInspector, get_index)
-{
-    ZEND_PARSE_PARAMETERS_NONE();
-    ZVAL_LONG(return_value, HtmlInspector_get_index(HTML_INSPECTOR(ZEND_THIS)));
-}
-ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO(arginfo_get_index, IS_LONG, false)
-ZEND_END_ARG_INFO()
-
-ZEND_METHOD(HtmlInspector, set_index)
-{
-    zend_long index;
+    zend_long node;
     ZEND_PARSE_PARAMETERS_START(1, 1)
-        Z_PARAM_LONG(index)
+        Z_PARAM_LONG(node)
     ZEND_PARSE_PARAMETERS_END();
-    HtmlInspector_set_index(HTML_INSPECTOR(ZEND_THIS), index);
-    ZVAL_OBJ_COPY(return_value, Z_OBJ_P(ZEND_THIS));
+    struct Selector *s = HtmlDocument_select(HTML_INSPECTOR(ZEND_THIS), node);
+    if (s == NULL) {
+        zend_throw_error(NULL, "malloc failed", 0);
+        return;
+    }
+    ZVAL_OBJ(return_value, zend_objects_new(class_entry_selector));
+    SELECTOR(return_value) = s;
 }
-ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO(arginfo_set_index, IS_VOID, false)
-    ZEND_ARG_TYPE_INFO(0, attribute, IS_LONG, false)
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_select, Selector, false)
+    ZEND_ARG_TYPE_INFO(0, node, IS_LONG, false)
 ZEND_END_ARG_INFO()
 
 /******************************************************************************/
 
-zend_object_handlers object_handlers;
+zend_object_handlers object_handlers_html_inspector, object_handlers_selector;
 
-static zend_object *
-create_object_html_inspector(zend_class_entry *ce)
+static zend_object * create_object_html_inspector(zend_class_entry *ce)
 {
     struct html_inspector_object *this = zend_object_alloc(sizeof (struct html_inspector_object), ce);
     zend_object_std_init(&this->std, ce);
-    this->std.handlers = &object_handlers;
+    this->std.handlers = &object_handlers_html_inspector;
     return &this->std;
 }
 
-zend_function_entry functions_HtmlInspector[] = {
-    ZEND_ME(HtmlInspector, resolve_iri_to_uri, arginfo_resolve_iri_to_uri, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
-    ZEND_ME(HtmlInspector, entities_to_utf8, arginfo_entities_to_utf8, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
-    ZEND_ME(HtmlInspector, extract_charset, arginfo_extract_charset, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
-    ZEND_ME(HtmlInspector, normalize_space, arginfo_normalize_space, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
-    ZEND_ME(HtmlInspector, __construct, arginfo___construct, ZEND_ACC_PUBLIC)
-    ZEND_ME(HtmlInspector, __destruct, arginfo___destruct, ZEND_ACC_PUBLIC)
-    ZEND_ME(HtmlInspector, fork, arginfo_fork, ZEND_ACC_PUBLIC)
-    ZEND_ME(HtmlInspector, reset, arginfo_reset, ZEND_ACC_PUBLIC)
-    ZEND_ME(HtmlInspector, iterate, arginfo_iterate, ZEND_ACC_PUBLIC)
-    ZEND_ME(HtmlInspector, rewind, arginfo_rewind, ZEND_ACC_PUBLIC)
-    ZEND_ME(HtmlInspector, nth, arginfo_nth, ZEND_ACC_PUBLIC)
-    ZEND_ME(HtmlInspector, child, arginfo_child, ZEND_ACC_PUBLIC)
-    ZEND_ME(HtmlInspector, ancestor, arginfo_ancestor, ZEND_ACC_PUBLIC)
-    ZEND_ME(HtmlInspector, descendant, arginfo_descendant, ZEND_ACC_PUBLIC)
-    ZEND_ME(HtmlInspector, preceding_sibling, arginfo_preceding_sibling, ZEND_ACC_PUBLIC)
-    ZEND_ME(HtmlInspector, following_sibling, arginfo_following_sibling, ZEND_ACC_PUBLIC)
-    ZEND_ME(HtmlInspector, name, arginfo_name, ZEND_ACC_PUBLIC)
-    ZEND_ME(HtmlInspector, attribute_exists, arginfo_attribute_exists, ZEND_ACC_PUBLIC)
-    ZEND_ME(HtmlInspector, attribute_equals, arginfo_attribute_equals, ZEND_ACC_PUBLIC)
-    ZEND_ME(HtmlInspector, attribute_contains, arginfo_attribute_contains, ZEND_ACC_PUBLIC)
-    ZEND_ME(HtmlInspector, attribute_starts_with, arginfo_attribute_starts_with, ZEND_ACC_PUBLIC)
-    ZEND_ME(HtmlInspector, or, arginfo_or, ZEND_ACC_PUBLIC)
-    ZEND_ME(HtmlInspector, and, arginfo_and, ZEND_ACC_PUBLIC)
-    ZEND_ME(HtmlInspector, not, arginfo_not, ZEND_ACC_PUBLIC)
-    ZEND_ME(HtmlInspector, case_i, arginfo_case_i, ZEND_ACC_PUBLIC)
-    ZEND_ME(HtmlInspector, get_inner_html, arginfo_get_inner_html, ZEND_ACC_PUBLIC)
-    ZEND_ME(HtmlInspector, get_outer_html, arginfo_get_outer_html, ZEND_ACC_PUBLIC)
-    ZEND_ME(HtmlInspector, get_name, arginfo_get_name, ZEND_ACC_PUBLIC)
-    ZEND_ME(HtmlInspector, get_value, arginfo_get_value, ZEND_ACC_PUBLIC)
-    ZEND_ME(HtmlInspector, get_attribute, arginfo_get_attribute, ZEND_ACC_PUBLIC)
-    ZEND_ME(HtmlInspector, get_offset, arginfo_get_offset, ZEND_ACC_PUBLIC)
-    ZEND_ME(HtmlInspector, get_index, arginfo_get_index, ZEND_ACC_PUBLIC)
-    ZEND_ME(HtmlInspector, set_index, arginfo_set_index, ZEND_ACC_PUBLIC)
+static zend_object * create_object_selector(zend_class_entry *ce)
+{
+    struct selector_object *this = zend_object_alloc(sizeof (struct selector_object), ce);
+    zend_object_std_init(&this->std, ce);
+    this->std.handlers = &object_handlers_selector;
+    return &this->std;
+}
+
+zend_function_entry functions_HtmlDocument[] = {
+    ZEND_ME(HtmlDocument, resolve_iri_to_uri, arginfo_resolve_iri_to_uri, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+    ZEND_ME(HtmlDocument, entities_to_utf8, arginfo_entities_to_utf8, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+    ZEND_ME(HtmlDocument, extract_charset, arginfo_extract_charset, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+    ZEND_ME(HtmlDocument, normalize_space, arginfo_normalize_space, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+    ZEND_ME(HtmlDocument, __construct, arginfo___construct, ZEND_ACC_PUBLIC)
+    ZEND_ME(HtmlDocument, __destruct, arginfo___destruct, ZEND_ACC_PUBLIC)
+    ZEND_ME(HtmlDocument, get_inner_html, arginfo_get_inner_html, ZEND_ACC_PUBLIC)
+    ZEND_ME(HtmlDocument, get_outer_html, arginfo_get_outer_html, ZEND_ACC_PUBLIC)
+    ZEND_ME(HtmlDocument, get_name, arginfo_get_name, ZEND_ACC_PUBLIC)
+    ZEND_ME(HtmlDocument, get_value, arginfo_get_value, ZEND_ACC_PUBLIC)
+    ZEND_ME(HtmlDocument, get_attribute, arginfo_get_attribute, ZEND_ACC_PUBLIC)
+    ZEND_ME(HtmlDocument, select, arginfo_select, ZEND_ACC_PUBLIC)
+    ZEND_FE_END
+};
+
+zend_function_entry functions_Selector[] = {
+    ZEND_ME(Selector, __destruct, arginfo_selector__destruct, ZEND_ACC_PUBLIC)
+    ZEND_ME(Selector, nth, arginfo_nth, ZEND_ACC_PUBLIC)
+    ZEND_ME(Selector, name, arginfo_name, ZEND_ACC_PUBLIC)
+    ZEND_ME(Selector, child, arginfo_child, ZEND_ACC_PUBLIC)
+    ZEND_ME(Selector, rewind, arginfo_rewind, ZEND_ACC_PUBLIC)
+    ZEND_ME(Selector, iterate, arginfo_iterate, ZEND_ACC_PUBLIC)
+    ZEND_ME(Selector, ancestor, arginfo_ancestor, ZEND_ACC_PUBLIC)
+    ZEND_ME(Selector, descendant, arginfo_descendant, ZEND_ACC_PUBLIC)
+    ZEND_ME(Selector, preceding_sibling, arginfo_preceding_sibling, ZEND_ACC_PUBLIC)
+    ZEND_ME(Selector, following_sibling, arginfo_following_sibling, ZEND_ACC_PUBLIC)
+    ZEND_ME(Selector, attribute_exists, arginfo_attribute_exists, ZEND_ACC_PUBLIC)
+    ZEND_ME(Selector, attribute_equals, arginfo_attribute_equals, ZEND_ACC_PUBLIC)
+    ZEND_ME(Selector, attribute_contains, arginfo_attribute_contains, ZEND_ACC_PUBLIC)
+    ZEND_ME(Selector, attribute_starts_with, arginfo_attribute_starts_with, ZEND_ACC_PUBLIC)
+    ZEND_ME(Selector, or, arginfo_or, ZEND_ACC_PUBLIC)
+    ZEND_ME(Selector, and, arginfo_and, ZEND_ACC_PUBLIC)
+    ZEND_ME(Selector, not, arginfo_not, ZEND_ACC_PUBLIC)
+    ZEND_ME(Selector, case_i, arginfo_case_i, ZEND_ACC_PUBLIC)
     ZEND_FE_END
 };
 
 PHP_MINIT_FUNCTION(html_inspector_minit)
 {
     zend_class_entry ce;
-    INIT_CLASS_ENTRY(ce, "HtmlInspector", functions_HtmlInspector);
+
+    INIT_CLASS_ENTRY(ce, "HtmlDocument", functions_HtmlDocument);
     class_entry_html_inspector = zend_register_internal_class(&ce);
     class_entry_html_inspector->create_object = create_object_html_inspector;
+    memcpy(&object_handlers_html_inspector, &std_object_handlers, sizeof (zend_object_handlers));
+    object_handlers_html_inspector.offset = offsetof(struct html_inspector_object, std);
 
-    memcpy(&object_handlers, &std_object_handlers, sizeof (zend_object_handlers));
-    object_handlers.offset = offsetof(struct html_inspector_object, std);
+    INIT_CLASS_ENTRY(ce, "Selector", functions_Selector);
+    class_entry_selector = zend_register_internal_class(&ce);
+    class_entry_selector->create_object = create_object_selector;
+    memcpy(&object_handlers_selector, &std_object_handlers, sizeof (zend_object_handlers));
+    object_handlers_selector.offset = offsetof(struct selector_object, std);
 
     return SUCCESS;
 }

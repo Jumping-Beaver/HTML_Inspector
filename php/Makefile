@@ -1,10 +1,12 @@
-.PHONY: all
-all:
+build/html_inspector.so: html_inspector.c html_inspector_php.c phpize
 	mkdir -p phpize build && cd phpize && \
-	ln -sf ../html_inspector.c html_inspector.c && \
-	ln -sf ../html_inspector_php.c html_inspector_php.c && \
-	ln -sf ../config.m4 config.m4 && \
-	phpize && ./configure && make && cp modules/html_inspector.so ../build
+	make && cp modules/html_inspector.so ../build && strip "../$@"
+
+phpsize:
+	phpize && ./configure
+
+html_inspector.c: ../html_inspector.c
+	ln -s ../html_inspector.c html_inspector.c
 
 .PHONY: test
 test:

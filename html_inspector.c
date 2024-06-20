@@ -1,36 +1,3 @@
-/*
-- separate filters and selectors into 2 Arrays????
-- Node als Integer exponieren
-  reset(0)->...
-- fork ist doof
-- how to nest queries?
-     (1) Explicitly reset the previous query by default or fork the main object
-         Unintended modification of the object is likely
-     (2) Query returns iterator object containing state and query
-         - Requires explicit free
-         - Query object becomes meaningless if document is freed / tight coupling
-           of the data structures is not reflected in the API
-     (2) Query returns iterator index, state and query are kept in the main object
-         Can be freed automatically after iterator exhaustion / rewind not possible!
-
-(int | struct Query) query = HtmlInspector_query(hi, (struct HtmlInspectorQuery) {
-    {AXIS_DESCENDANT},
-    {FILTER_NAME, "body"},
-    {FILTER_OR}
-    {NULL}
-}, 0);
-HtmlInspector_iterate(hi, query);
-HtmlInspector_iterate(hi, node_iterator);
-
-
-$query = $hi->child()->child()->get_query();
-while ($hi->iterate($query)) {
-    $query2 = hi->descendant()->name('span')->get_query();
-}
-// Auto-free of $query here; rewind not possible
-
-*/
-
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -398,7 +365,7 @@ struct String {
 #define STRING(cstring) (struct String) {cstring, sizeof cstring - 1, 0}
 #define NULL_STRING ((struct String) {.data = NULL, .length = 0, .is_malloced = false});
 
-void HtmlInspector_normalize_space(struct String *input)
+void HtmlDocument_normalize_space(struct String *input)
 {
     struct String result = (struct String) {
         .data = malloc(input->length),
@@ -440,7 +407,7 @@ void HtmlInspector_normalize_space(struct String *input)
     *input = result;
 }
 
-void HtmlInspector_entities_to_utf8(struct String *input, bool skip_stray_tags)
+void HtmlDocument_entities_to_utf8(struct String *input, bool skip_stray_tags)
 {
     struct String result = (struct String) {
         .data = malloc(input->length),
@@ -591,7 +558,7 @@ void string_free(struct String string)
     }
 }
 
-static inline int strnicmp(const char *s1, const char *s2, size_t length)
+static int strnicmp(const char *s1, const char *s2, size_t length)
 {
     int diff = 0;
     while (length--) {
@@ -617,16 +584,7 @@ static inline int strnicmp(const char *s1, const char *s2, size_t length)
 
 /*****************************************************************************/
 
-/*struct HtmlInspectorNode {
-    int index;
-    struct HtmlInspector *hi;
-};
-
-struct HtmlInspectorSelector {
-    struct HtmlInspector *hi;
-};*/
-
-struct ParsedDocument {
+struct HtmlDocument {
     const unsigned char *html;
     struct Node {
         union {
@@ -658,7 +616,6 @@ struct ParsedDocument {
         unsigned short value_length;
     } *attributes;
     unsigned int node_count;
-    unsigned int references;
 };
 
 static const int POSITION_NOT_STARTED = -1;
@@ -688,9 +645,8 @@ enum SelectorItemType {
     FILTER_ATTRIBUTE_STARTS_WITH_I,
 };
 
-struct HtmlInspector {
-    struct ParsedDocument *doc;
-    struct Node *current_node;
+struct Selector {
+    struct HtmlDocument *doc;
     struct Node *reference_node;
     unsigned int active_axis;
     struct SelectorItem {
@@ -705,9 +661,8 @@ struct HtmlInspector {
             } filter_data;
         };
         enum SelectorItemType type;
-    } selector_items[228];
+    } selector_items[128];
     char selector_item_count;
-    bool must_iterate;
 };
 
 /*****************************************************************************/
@@ -768,7 +723,7 @@ static bool parse_attribute(struct Attribute *attribute, const unsigned char **h
 
 #define CHARSEQICMP(s1, length, s2) (length != sizeof s2 - 1 || strnicmp(s1, s2, length))
 
-struct String HtmlInspector_extract_charset(const unsigned char *html)
+struct String HtmlDocument_extract_charset(const unsigned char *html)
 {
     struct Attribute attribute;
     const unsigned char *html_start = html;
@@ -795,12 +750,11 @@ struct String HtmlInspector_extract_charset(const unsigned char *html)
             while (CHARMASK_TAG_NAME_END[html[name_length]] == 0) {
                 name_length += 1;
             }
-            if (
-                !CHARSEQICMP(name_start, name_length, "script") ||
+            if (!CHARSEQICMP(name_start, name_length, "script") ||
                 !CHARSEQICMP(name_start, name_length, "style") ||
                 !CHARSEQICMP(name_start, name_length, "title") ||
-                !CHARSEQICMP(name_start, name_length, "textarea")
-            ) {
+                !CHARSEQICMP(name_start, name_length, "textarea"))
+            {
                 html += name_length;
                 do {
                     html += 1;
@@ -827,7 +781,7 @@ struct String HtmlInspector_extract_charset(const unsigned char *html)
                     .length = attribute.value_length,
                     .is_malloced = false
                 };
-                HtmlInspector_entities_to_utf8(&result, false);
+                HtmlDocument_entities_to_utf8(&result, false);
                 return result;
             }
             if (!strnicmp(attribute.name_start, "content", attribute.name_length)) {
@@ -840,14 +794,14 @@ struct String HtmlInspector_extract_charset(const unsigned char *html)
                     .length = attribute.value_length,
                     .is_malloced = false
                 };
-                HtmlInspector_entities_to_utf8(&attrval, false);
+                HtmlDocument_entities_to_utf8(&attrval, false);
                 if (!strnicmp(attrval.data, "content-type", attrval.length)) {
                     has_http_equiv_content_type = true;
                 }
             }
         }
         if (has_http_equiv_content_type && content.data != NULL) {
-            HtmlInspector_entities_to_utf8(&content, false);
+            HtmlDocument_entities_to_utf8(&content, false);
             int charset_begin = 0, charset_length = 0;
             for (; charset_begin < content.length; ++charset_begin) {
                 if (content.data[charset_begin] != ';') {
@@ -900,19 +854,16 @@ struct String HtmlInspector_extract_charset(const unsigned char *html)
     return NULL_STRING;
 }
 
-void HtmlInspector_free(struct HtmlInspector *hi)
+void HtmlDocument_free(struct HtmlDocument *doc)
 {
-    if (--hi->doc->references == 0) {
-        if (hi->doc->attributes != NULL) {
-            free(hi->doc->attributes);
-        }
-        free(hi->doc->nodes);
-        free(hi->doc);
+    if (doc->attributes != NULL) {
+        free(doc->attributes);
     }
-    free(hi);
+    free(doc->nodes);
+    free(doc);
 }
 
-static struct HtmlInspector * HtmlInspector(const unsigned char *html)
+static struct HtmlDocument * HtmlDocument(const unsigned char *html)
 {
     // Minimizing the number of `realloc` calls is essential to achieve the best performance. We
     // use heuristic starting values depending on the input length. `strlen` is very fast.
@@ -922,26 +873,20 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
     int nodes_capacity = 100 + html_strlen / 40;
     int attributes_capacity = 100 + nodes_capacity * 2.4;
 
-    struct HtmlInspector *hi = malloc(sizeof (struct HtmlInspector));
-    if (hi == NULL) {
+    struct HtmlDocument *doc = malloc(sizeof (struct HtmlDocument));
+    if (doc == NULL) {
+        free(doc);
         return NULL;
     }
-    hi->doc = malloc(sizeof (struct ParsedDocument));
-    if (hi->doc == NULL) {
-        free(hi);
+    doc->nodes = malloc(nodes_capacity * sizeof (struct Node));
+    if (doc->nodes == NULL) {
+        free(doc);
         return NULL;
     }
-    hi->doc->nodes = malloc(nodes_capacity * sizeof (struct Node));
-    if (hi->doc->nodes == NULL) {
-        free(hi->doc);
-        free(hi);
-        return NULL;
-    }
-    hi->doc->attributes = malloc(attributes_capacity * sizeof (struct Attribute));
-    if (hi->doc->attributes == NULL) {
-        free(hi->doc->nodes);
-        free(hi->doc);
-        free(hi);
+    doc->attributes = malloc(attributes_capacity * sizeof (struct Attribute));
+    if (doc->attributes == NULL) {
+        free(doc->nodes);
+        free(doc);
         return NULL;
     }
 
@@ -950,9 +895,8 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
     int unclosed_elements_capacity = 100;
     int *unclosed_elements = malloc(unclosed_elements_capacity * sizeof *unclosed_elements);
     if (unclosed_elements == NULL) {
-        free(hi->doc->nodes);
-        free(hi->doc);
-        free(hi);
+        free(doc->nodes);
+        free(doc);
         return NULL;
     }
     #define INCREMENT_UNCLOSED_ELEMENTS_SIZE() \
@@ -962,26 +906,20 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
                 unclosed_elements_capacity * sizeof *unclosed_elements); \
             if (new_unclosed_elements == NULL) { \
                 free(unclosed_elements); \
-                HtmlInspector_free(hi); \
+                HtmlDocument_free(doc); \
                 return NULL; \
             } \
             unclosed_elements = new_unclosed_elements; \
         }
 
-    hi->doc->nodes[0] = (struct Node) {
+    doc->nodes[0] = (struct Node) {
         .name_start = "#document",
         .name_length = sizeof "#document" - 1,
         .attributes_count = 0,
         .type = NODE_TYPE_DOCUMENT
     };
-    hi->doc->node_count = 1;
-    hi->doc->references = 1;
-    hi->doc->html = html;
-    hi->current_node = hi->doc->nodes;
-    hi->reference_node = hi->doc->nodes;
-    hi->selector_item_count = 0;
-    hi->active_axis = 0;
-    hi->must_iterate = false;
+    doc->node_count = 1;
+    doc->html = html;
 
     int attributes_count = 0;
     int html_node = -1, head_node = -1, body_node = -1, tbody_node = -2, colgroup_node = -1;
@@ -991,15 +929,15 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
     // calculating the bitmasks in every call.
 
     #define INCREMENT_NODE_COUNT() \
-        if (++hi->doc->node_count == nodes_capacity - 1) { \
+        if (++doc->node_count == nodes_capacity - 1) { \
             nodes_capacity = 1 + (int) (nodes_capacity * 1.2); \
-            struct Node *new_nodes = realloc(hi->doc->nodes, nodes_capacity * sizeof *new_nodes); \
+            struct Node *new_nodes = realloc(doc->nodes, nodes_capacity * sizeof *new_nodes); \
             if (new_nodes == NULL) { \
                 free(unclosed_elements); \
-                HtmlInspector_free(hi); \
+                HtmlDocument_free(doc); \
                 return NULL; \
             } \
-            hi->doc->nodes = new_nodes; \
+            doc->nodes = new_nodes; \
         }
 
     while (true) {
@@ -1011,7 +949,7 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
                 while (html[0] != '\0' && (html[0] != '-' || html[1] != '-' || html[2] != '>')) {
                     html += 1;
                 }
-                hi->doc->nodes[hi->doc->node_count] = (struct Node) {
+                doc->nodes[doc->node_count] = (struct Node) {
                     .name_start = comment_start,
                     .name_length = html - comment_start,
                     .type = NODE_TYPE_COMMENT,
@@ -1033,7 +971,7 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
                 struct Node *node;
                 int k;
                 for (k = unclosed_elements_size - 1; k >= 0; --k) {
-                    node = &hi->doc->nodes[unclosed_elements[k]];
+                    node = &doc->nodes[unclosed_elements[k]];
                     if (name_length == node->name_length && !strnicmp(node->name_start, html, name_length)) {
                         has_found_start_node = true;
                         break;
@@ -1048,13 +986,13 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
                     // <c>  ← indent_width = 2
                     // </a>
                     int indent_width = unclosed_elements_size - k;
-                    for (int node_index = hi->doc->node_count - 1; node_index >= unclosed_elements[k]; --node_index) {
+                    for (int node_index = doc->node_count - 1; node_index >= unclosed_elements[k]; --node_index) {
                         if (node_index == unclosed_elements[unclosed_elements_size - 1]) {
                             unclosed_elements_size -= 1;
                             indent_width -= 1;
-                            hi->doc->nodes[node_index].type = NODE_TYPE_NONVOID_ELEMENT;
+                            doc->nodes[node_index].type = NODE_TYPE_NONVOID_ELEMENT;
                         }
-                        hi->doc->nodes[node_index].nesting_level += indent_width;
+                        doc->nodes[node_index].nesting_level += indent_width;
                     }
                 }
                 html += name_length;
@@ -1070,9 +1008,9 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
 
                 // Not start tag found. We extend the current text node until the next `<`
                 // following the stray tag. Stray tags are filtered out by the
-                // `HtmlInspector_entities_to_utf8` function.
+                // `HtmlDocument_entities_to_utf8` function.
 
-                node = &hi->doc->nodes[hi->doc->node_count - 1];
+                node = &doc->nodes[doc->node_count - 1];
                 if (node->type != NODE_TYPE_TEXT) {
                     continue;
                 }
@@ -1093,18 +1031,18 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
                     name_length += 1;
                 }
                 html += name_length;
-                while (parse_attribute(&hi->doc->attributes[new_attributes_count], &html)) {
+                while (parse_attribute(&doc->attributes[new_attributes_count], &html)) {
                     if (++new_attributes_count == attributes_capacity) {
                         attributes_capacity *= 1.2;
                         struct Attribute *new_attributes = realloc(
-                            hi->doc->attributes, attributes_capacity * sizeof *hi->doc->attributes
+                            doc->attributes, attributes_capacity * sizeof *doc->attributes
                         );
                         if (new_attributes == NULL) {
                             free(unclosed_elements);
-                            HtmlInspector_free(hi);
+                            HtmlDocument_free(doc);
                             return NULL;
                         }
-                        hi->doc->attributes = new_attributes;
+                        doc->attributes = new_attributes;
                     }
                 }
                 if (*html == '/') {
@@ -1122,42 +1060,42 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
                     else if (!CHARSEQICMP(name, name_length, "html")) {
                         if (html_node != -1) {
                             added_node.name_start = NULL;
-                            node_for_attributes = &hi->doc->nodes[html_node];
+                            node_for_attributes = &doc->nodes[html_node];
                         }
                         else {
-                            html_node = hi->doc->node_count;
+                            html_node = doc->node_count;
                             added_node = (struct Node) {"html", sizeof "html" - 1};
                             break_after_adding_node = true;
                             node_for_attributes = &added_node;
                         }
                     }
                     else if (html_node == -1) {
-                        html_node = hi->doc->node_count;
+                        html_node = doc->node_count;
                         added_node = (struct Node) {"html", sizeof "html" - 1};
                     }
                     else if (!CHARSEQICMP(name, name_length, "head")) {
                         if (head_node != -1) {
                             added_node.name_start = NULL;
-                            node_for_attributes = &hi->doc->nodes[head_node];
+                            node_for_attributes = &doc->nodes[head_node];
                         }
                         else {
-                            head_node = hi->doc->node_count;
+                            head_node = doc->node_count;
                             added_node = (struct Node) {"head", sizeof "head" - 1};
                             break_after_adding_node = true;
                             node_for_attributes = &added_node;
                         }
                     }
                     else if (head_node == -1) {
-                        head_node = hi->doc->node_count;
+                        head_node = doc->node_count;
                         added_node = (struct Node) {"head", sizeof "head" - 1};
                     }
                     else if (!CHARSEQICMP(name, name_length, "body")) {
                         if (body_node != -1) {
                             added_node.name_start = NULL;
-                            node_for_attributes = &hi->doc->nodes[body_node];
+                            node_for_attributes = &doc->nodes[body_node];
                         }
                         else {
-                            body_node = hi->doc->node_count;
+                            body_node = doc->node_count;
                             added_node = (struct Node) {"body", sizeof "body" - 1};
                             break_after_adding_node = true;
                             node_for_attributes = &added_node;
@@ -1174,7 +1112,7 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
                         CHARSEQICMP(name, name_length, "script") &&
                         CHARSEQICMP(name, name_length, "noscript")))
                     {
-                        body_node = hi->doc->node_count;
+                        body_node = doc->node_count;
                         added_node = (struct Node) {"body", sizeof "body" - 1};
                     }
                     else if (tbody_node == -1 &&
@@ -1183,11 +1121,11 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
                         CHARSEQICMP(name, name_length, "colgroup") ||
                         CHARSEQICMP(name, name_length, "thead")))
                     {
-                        tbody_node = hi->doc->node_count;
+                        tbody_node = doc->node_count;
                         added_node = (struct Node) {"tbody", sizeof "tbody" - 1};
                     }
                     else if (colgroup_node == -1 && !CHARSEQICMP(name, name_length, "col")) {
-                        colgroup_node = hi->doc->node_count;
+                        colgroup_node = doc->node_count;
                         added_node = (struct Node) {"colgroup", sizeof "colgroup" - 1};
                     }
                     else {
@@ -1195,7 +1133,7 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
                             tbody_node = -1;
                         }
                         else if (!CHARSEQICMP(name, name_length, "colgroup")) {
-                            colgroup_node = hi->doc->node_count;
+                            colgroup_node = doc->node_count;
                         }
                         else {
                             colgroup_node = -1;
@@ -1229,8 +1167,7 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
                     // Void elements
                     // https://html.spec.whatwg.org/multipage/syntax.html#void-elements
 
-                    if (
-                        !CHARSEQICMP(added_node.name_start, added_node.name_length, "br") ||
+                    if (!CHARSEQICMP(added_node.name_start, added_node.name_length, "br") ||
                         !CHARSEQICMP(added_node.name_start, added_node.name_length, "img") ||
                         !CHARSEQICMP(added_node.name_start, added_node.name_length, "meta") ||
                         !CHARSEQICMP(added_node.name_start, added_node.name_length, "link") ||
@@ -1242,15 +1179,15 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
                         !CHARSEQICMP(added_node.name_start, added_node.name_length, "area") ||
                         !CHARSEQICMP(added_node.name_start, added_node.name_length, "wbr") ||
                         !CHARSEQICMP(added_node.name_start, added_node.name_length, "source") ||
-                        !CHARSEQICMP(added_node.name_start, added_node.name_length, "track")
-                    ) {
+                        !CHARSEQICMP(added_node.name_start, added_node.name_length, "track"))
+                    {
                         added_node.type = NODE_TYPE_VOID_ELEMENT;
                     }
 
                     // Auto-close unclosed nodes with optional end tag
                     // https://html.spec.whatwg.org/multipage/syntax.html#optional-tags
 
-                    struct Node *node = &hi->doc->nodes[unclosed_elements[unclosed_elements_size - 1]];
+                    struct Node *node = &doc->nodes[unclosed_elements[unclosed_elements_size - 1]];
 
                     if (
                         !CHARSEQICMP(added_node.name_start, added_node.name_length, "body") &&
@@ -1353,7 +1290,7 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
                         )
                     ) {
                         node->type = NODE_TYPE_NONVOID_ELEMENT;
-                        while (++node < &hi->doc->nodes[hi->doc->node_count]) {
+                        while (++node < &doc->nodes[doc->node_count]) {
                             node->nesting_level += 1;
                         }
                         unclosed_elements_size -= 1;
@@ -1362,10 +1299,10 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
                     // Append the node
 
                     if (added_node.type == NODE_TYPE_UNCLOSED_ELEMENT) {
-                        unclosed_elements[unclosed_elements_size] = hi->doc->node_count;
+                        unclosed_elements[unclosed_elements_size] = doc->node_count;
                         INCREMENT_UNCLOSED_ELEMENTS_SIZE();
                     }
-                    hi->doc->nodes[hi->doc->node_count] = added_node;
+                    doc->nodes[doc->node_count] = added_node;
                     INCREMENT_NODE_COUNT();
                 } while (!break_after_adding_node);
             }
@@ -1378,13 +1315,12 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
         bool has_only_whitespace = true;
         enum NodeType type = NODE_TYPE_TEXT;
 
-        struct Node *node = &hi->doc->nodes[hi->doc->node_count - 1];
-        if (
-            !CHARSEQICMP(node->name_start, node->name_length, "script") ||
+        struct Node *node = &doc->nodes[doc->node_count - 1];
+        if (!CHARSEQICMP(node->name_start, node->name_length, "script") ||
             !CHARSEQICMP(node->name_start, node->name_length, "style") ||
             !CHARSEQICMP(node->name_start, node->name_length, "title") ||
-            !CHARSEQICMP(node->name_start, node->name_length, "textarea")
-        ) {
+            !CHARSEQICMP(node->name_start, node->name_length, "textarea"))
+        {
             type = NODE_TYPE_CDATA;
             while (html[text_node_length] != '\0') {
                 text_node_length += 1;
@@ -1409,27 +1345,27 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
 
         if (type == NODE_TYPE_TEXT && !has_only_whitespace && body_node == -1) {
             if (html_node == -1) {
-                hi->doc->nodes[hi->doc->node_count] = (struct Node) {
+                doc->nodes[doc->node_count] = (struct Node) {
                     .name_start = "html",
                     .name_length = sizeof "html" - 1,
                     .type = NODE_TYPE_UNCLOSED_ELEMENT,
                     .nesting_level = 1,
                 };
-                html_node = hi->doc->node_count;
+                html_node = doc->node_count;
                 INCREMENT_NODE_COUNT();
             }
-            hi->doc->nodes[hi->doc->node_count] = (struct Node) {
+            doc->nodes[doc->node_count] = (struct Node) {
                 .name_start = "body",
                 .name_length = sizeof "body" - 1,
                 .type = NODE_TYPE_UNCLOSED_ELEMENT,
                 .nesting_level = 1,
             };
-            body_node = hi->doc->node_count;
+            body_node = doc->node_count;
             INCREMENT_NODE_COUNT();
             if (head_node != -1) {
-                hi->doc->nodes[head_node].type = NODE_TYPE_NONVOID_ELEMENT;
-                for (int i = head_node + 1; i < hi->doc->node_count - 1; ++i) {
-                    hi->doc->nodes[i].nesting_level += 1;
+                doc->nodes[head_node].type = NODE_TYPE_NONVOID_ELEMENT;
+                for (int i = head_node + 1; i < doc->node_count - 1; ++i) {
+                    doc->nodes[i].nesting_level += 1;
                 }
                 while (unclosed_elements[unclosed_elements_size - 1] != head_node) {
                     unclosed_elements_size -= 1;
@@ -1440,7 +1376,7 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
             INCREMENT_UNCLOSED_ELEMENTS_SIZE();
         }
         if (type == NODE_TYPE_CDATA || !has_only_whitespace || body_node != -1) {
-            hi->doc->nodes[hi->doc->node_count] = (struct Node) {
+            doc->nodes[doc->node_count] = (struct Node) {
                 .type = type,
                 .value_start = html,
                 .value_length = text_node_length,
@@ -1453,9 +1389,9 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
 
     // Next we close all unclosed elements
 
-    struct Node *node = &hi->doc->nodes[hi->doc->node_count - 1];
+    struct Node *node = &doc->nodes[doc->node_count - 1];
     while (unclosed_elements_size > 0) {
-        if (node == &hi->doc->nodes[unclosed_elements[unclosed_elements_size - 1]]) {
+        if (node == &doc->nodes[unclosed_elements[unclosed_elements_size - 1]]) {
             node->type = NODE_TYPE_NONVOID_ELEMENT;
             unclosed_elements_size -= 1;
         }
@@ -1468,28 +1404,28 @@ static struct HtmlInspector * HtmlInspector(const unsigned char *html)
     free(unclosed_elements);
 
     if (attributes_count == 0) {
-        free(hi->doc->attributes);
-        hi->doc->attributes = NULL;
+        free(doc->attributes);
+        doc->attributes = NULL;
     }
     else {
         struct Attribute *new_attributes = realloc(
-            hi->doc->attributes, attributes_count * sizeof *hi->doc->attributes
+            doc->attributes, attributes_count * sizeof *doc->attributes
         );
         if (new_attributes == NULL) {
-            HtmlInspector_free(hi);
+            HtmlDocument_free(doc);
             return NULL;
         }
-        hi->doc->attributes = new_attributes;
+        doc->attributes = new_attributes;
     }
 
-    struct Node *new_nodes = realloc(hi->doc->nodes, hi->doc->node_count * sizeof *hi->doc->nodes);
+    struct Node *new_nodes = realloc(doc->nodes, doc->node_count * sizeof *doc->nodes);
     if (new_nodes == NULL) {
-        HtmlInspector_free(hi);
+        HtmlDocument_free(doc);
         return NULL;
     }
-    hi->doc->nodes = new_nodes;
+    doc->nodes = new_nodes;
 
-    return hi;
+    return doc;
 }
 
 /*****************************************************************************/
@@ -1518,7 +1454,7 @@ static bool str_contains(const char *haystack, size_t haystack_length, const cha
     return false;
 }
 
-static void HtmlInspector_push_selector(struct HtmlInspector *hi, enum SelectorItemType type,
+static void Selector_push_selector(struct Selector *hi, enum SelectorItemType type,
     const void *filter_arg1, const void *filter_arg2)
 {
     if (hi->selector_item_count == 0 && type >= FILTER_OR) {
@@ -1537,10 +1473,9 @@ static void HtmlInspector_push_selector(struct HtmlInspector *hi, enum SelectorI
         hi->selector_items[hi->selector_item_count].filter_data.arg2 = filter_arg2;
     }
     hi->selector_item_count += 1;
-    hi->must_iterate = true;
 }
 
-void HtmlInspector_iterate_axis(struct HtmlInspector *hi, struct SelectorItem *si,
+void Selector_iterate_axis(struct Selector *hi, struct SelectorItem *si,
     const struct Node *ref)
 {
     if (si->position == POSITION_NOT_STARTED) {
@@ -1595,7 +1530,7 @@ void HtmlInspector_iterate_axis(struct HtmlInspector *hi, struct SelectorItem *s
     }
 }
 
-static bool HtmlInspector_filter(struct HtmlInspector *hi, struct SelectorItem *si)
+static bool Selector_filter(struct Selector *hi, struct SelectorItem *si, struct Node *node)
 {
     if (si->type == FILTER_NTH) {
         struct SelectorItem *axis_selector = si;
@@ -1610,20 +1545,20 @@ static bool HtmlInspector_filter(struct HtmlInspector *hi, struct SelectorItem *
         return axis_selector->axis_n == (long) si->filter_data.arg1;
     }
     else if (si->type == FILTER_NODE_NAME) {
-        if (hi->current_node->type == NODE_TYPE_COMMENT) {
-            return !CHARSEQICMP(hi->current_node->name_start, hi->current_node->name_length, "#comment");
+        if (node->type == NODE_TYPE_COMMENT) {
+            return !CHARSEQICMP(node->name_start, node->name_length, "#comment");
         }
-        else if (hi->current_node->type == NODE_TYPE_TEXT || hi->current_node->type == NODE_TYPE_CDATA) {
-            return !CHARSEQICMP(hi->current_node->name_start, hi->current_node->name_length, "#text");
+        else if (node->type == NODE_TYPE_TEXT || node->type == NODE_TYPE_CDATA) {
+            return !CHARSEQICMP(node->name_start, node->name_length, "#text");
         }
         const char *name = (const char *) si->filter_data.arg1;
-        return hi->current_node->name_length == strlen(name) &&
-            !strnicmp(hi->current_node->name_start, name, hi->current_node->name_length);
+        return node->name_length == strlen(name) &&
+            !strnicmp(node->name_start, name, node->name_length);
     }
 
     size_t name_length = strlen(si->filter_data.arg1);
-    for (int i = 0; i < hi->current_node->attributes_count; ++i) {
-        struct Attribute *attr = &hi->doc->attributes[hi->current_node->attributes_start + i];
+    for (int i = 0; i < node->attributes_count; ++i) {
+        struct Attribute *attr = &hi->doc->attributes[node->attributes_start + i];
         if (name_length != attr->name_length || strnicmp(si->filter_data.arg1, attr->name_start, attr->name_length)) {
             continue;
         }
@@ -1631,7 +1566,7 @@ static bool HtmlInspector_filter(struct HtmlInspector *hi, struct SelectorItem *
             return true;
         }
         struct String attr_string = {(char *) attr->value_start, attr->value_length, false};
-        HtmlInspector_entities_to_utf8(&attr_string, false);
+        HtmlDocument_entities_to_utf8(&attr_string, false);
 
         bool matches = false;
         if (si->type == FILTER_ATTRIBUTE_EQUALS) {
@@ -1668,13 +1603,12 @@ static bool HtmlInspector_filter(struct HtmlInspector *hi, struct SelectorItem *
     return false;
 }
 
-/*struct HtmlInspectorNode */ bool HtmlInspector_iterate(struct HtmlInspector *hi)
+int Selector_iterate(struct Selector *hi)
 {
     // The logic here relies on the refusal to push filters to selector item position 0
 
-    hi->must_iterate = false;
     if (hi->selector_item_count == 0 || hi->selector_items[0].position == POSITION_EXHAUSTED) {
-        return 0;
+        return -1;
     }
     while (true) {
         int preceding_axis = hi->active_axis;
@@ -1686,11 +1620,10 @@ static bool HtmlInspector_filter(struct HtmlInspector *hi, struct SelectorItem *
         const struct Node *ref = preceding_axis == -1 ? hi->reference_node :
             &hi->doc->nodes[hi->selector_items[preceding_axis].position];
 
-        HtmlInspector_iterate_axis(hi, &hi->selector_items[hi->active_axis], ref);
+        Selector_iterate_axis(hi, &hi->selector_items[hi->active_axis], ref);
         if (hi->selector_items[hi->active_axis].position == POSITION_EXHAUSTED) {
             if (hi->active_axis == 0) {
-                hi->current_node = NULL;
-                return 0;
+                return -1;
             }
             do {
                 hi->active_axis -= 1;
@@ -1702,7 +1635,6 @@ static bool HtmlInspector_filter(struct HtmlInspector *hi, struct SelectorItem *
         }
 
         hi->selector_items[hi->active_axis].axis_n += 1;
-        hi->current_node = &hi->doc->nodes[hi->selector_items[hi->active_axis].position];
 
         unsigned int bool_stack_capacity = 0;
         int filter_index = hi->active_axis;
@@ -1735,7 +1667,8 @@ static bool HtmlInspector_filter(struct HtmlInspector *hi, struct SelectorItem *
                 }
             }
             else {
-                bool_stack[bool_stack_size++] = HtmlInspector_filter(hi, &hi->selector_items[filter_index]);
+                struct Node *node = &hi->doc->nodes[hi->selector_items[hi->active_axis].position];
+                bool_stack[bool_stack_size++] = Selector_filter(hi, &hi->selector_items[filter_index], node);
             }
         }
         bool filter_state = true;
@@ -1750,7 +1683,7 @@ static bool HtmlInspector_filter(struct HtmlInspector *hi, struct SelectorItem *
         }
 
         if (filter_index == hi->selector_item_count) {
-            return 1;
+            return hi->selector_items[hi->active_axis].position;
         }
 
         hi->active_axis = filter_index;
@@ -1759,77 +1692,77 @@ static bool HtmlInspector_filter(struct HtmlInspector *hi, struct SelectorItem *
     }
 }
 
-void HtmlInspector_child(struct HtmlInspector *hi)
+void Selector_child(struct Selector *hi)
 {
-    HtmlInspector_push_selector(hi, AXIS_CHILD, NULL, NULL);
+    Selector_push_selector(hi, AXIS_CHILD, NULL, NULL);
 }
 
-void HtmlInspector_ancestor(struct HtmlInspector *hi)
+void Selector_ancestor(struct Selector *hi)
 {
-    HtmlInspector_push_selector(hi, AXIS_ANCESTOR, NULL, NULL);
+    Selector_push_selector(hi, AXIS_ANCESTOR, NULL, NULL);
 }
 
-void HtmlInspector_descendant(struct HtmlInspector *hi)
+void Selector_descendant(struct Selector *hi)
 {
-    HtmlInspector_push_selector(hi, AXIS_DESCENDANT, NULL, NULL);
+    Selector_push_selector(hi, AXIS_DESCENDANT, NULL, NULL);
 }
 
-void HtmlInspector_preceding_sibling(struct HtmlInspector *hi)
+void Selector_preceding_sibling(struct Selector *hi)
 {
-    HtmlInspector_push_selector(hi, AXIS_PRECEDING_SIBLING, NULL, NULL);
+    Selector_push_selector(hi, AXIS_PRECEDING_SIBLING, NULL, NULL);
 }
 
-void HtmlInspector_following_sibling(struct HtmlInspector *hi)
+void Selector_following_sibling(struct Selector *hi)
 {
-    HtmlInspector_push_selector(hi, AXIS_FOLLOWING_SIBLING, NULL, NULL);
+    Selector_push_selector(hi, AXIS_FOLLOWING_SIBLING, NULL, NULL);
 }
 
-void HtmlInspector_nth(struct HtmlInspector *hi, unsigned int n)
+void Selector_nth(struct Selector *hi, unsigned int n)
 {
-    HtmlInspector_push_selector(hi, FILTER_NTH, (void *) (long) n, NULL);
+    Selector_push_selector(hi, FILTER_NTH, (void *) (long) n, NULL);
 }
 
-void HtmlInspector_name(struct HtmlInspector *hi, const char *name)
+void Selector_name(struct Selector *hi, const char *name)
 {
-    HtmlInspector_push_selector(hi, FILTER_NODE_NAME, name, NULL);
+    Selector_push_selector(hi, FILTER_NODE_NAME, name, NULL);
 }
 
-void HtmlInspector_attribute_exists(struct HtmlInspector *hi, const char *name)
+void Selector_attribute_exists(struct Selector *hi, const char *name)
 {
-    HtmlInspector_push_selector(hi, FILTER_ATTRIBUTE_EXISTS, name, NULL);
+    Selector_push_selector(hi, FILTER_ATTRIBUTE_EXISTS, name, NULL);
 }
 
-void HtmlInspector_attribute_equals(struct HtmlInspector *hi, const char *name, const char *value)
+void Selector_attribute_equals(struct Selector *hi, const char *name, const char *value)
 {
-    HtmlInspector_push_selector(hi, FILTER_ATTRIBUTE_EQUALS, name, value);
+    Selector_push_selector(hi, FILTER_ATTRIBUTE_EQUALS, name, value);
 }
 
-void HtmlInspector_attribute_contains(struct HtmlInspector *hi, const char *name, const char *value)
+void Selector_attribute_contains(struct Selector *hi, const char *name, const char *value)
 {
-    HtmlInspector_push_selector(hi, FILTER_ATTRIBUTE_CONTAINS, name, value);
+    Selector_push_selector(hi, FILTER_ATTRIBUTE_CONTAINS, name, value);
 }
 
-void HtmlInspector_attribute_starts_with(struct HtmlInspector *hi, const char *name, const char *value)
+void Selector_attribute_starts_with(struct Selector *hi, const char *name, const char *value)
 {
-    HtmlInspector_push_selector(hi, FILTER_ATTRIBUTE_STARTS_WITH, name, value);
+    Selector_push_selector(hi, FILTER_ATTRIBUTE_STARTS_WITH, name, value);
 }
 
-void HtmlInspector_or(struct HtmlInspector *hi)
+void Selector_or(struct Selector *hi)
 {
-    HtmlInspector_push_selector(hi, FILTER_OR, NULL, NULL);
+    Selector_push_selector(hi, FILTER_OR, NULL, NULL);
 }
 
-void HtmlInspector_and(struct HtmlInspector *hi)
+void Selector_and(struct Selector *hi)
 {
-    HtmlInspector_push_selector(hi, FILTER_AND, NULL, NULL);
+    Selector_push_selector(hi, FILTER_AND, NULL, NULL);
 }
 
-void HtmlInspector_not(struct HtmlInspector *hi)
+void Selector_not(struct Selector *hi)
 {
-    HtmlInspector_push_selector(hi, FILTER_NOT, NULL, NULL);
+    Selector_push_selector(hi, FILTER_NOT, NULL, NULL);
 }
 
-void HtmlInspector_case_i(struct HtmlInspector *hi)
+void Selector_case_i(struct Selector *hi)
 {
     if (hi->selector_item_count == 0) {
         return;
@@ -1849,84 +1782,68 @@ void HtmlInspector_case_i(struct HtmlInspector *hi)
     }
 }
 
-void HtmlInspector_rewind(struct HtmlInspector *hi)
+void Selector_rewind(struct Selector *hi)
 {
     if (hi->selector_item_count > 0) {
         // This is safe because we refuse to push filters to position 0
         hi->selector_items[0].position = POSITION_NOT_STARTED;
     }
-    hi->current_node = hi->reference_node;
-    hi->must_iterate = false;
     hi->active_axis = 0;
 }
 
-void HtmlInspector_reset(struct HtmlInspector *hi)
+void HtmlDocument_reset(struct Selector *hi)
 {
-    hi->current_node = hi->reference_node;
-    hi->must_iterate = false;
     hi->active_axis = 0;
     hi->selector_item_count = 0;
 }
 
-struct String HtmlInspector_get_name(struct HtmlInspector *hi)
+struct String HtmlDocument_get_name(struct HtmlDocument *doc, int node)
 {
-    if (hi->must_iterate) {
-        HtmlInspector_iterate(hi);
-    }
-    if (hi->current_node == NULL) {
-        return NULL_STRING;
-    }
-    if (hi->current_node->type == NODE_TYPE_TEXT || hi->current_node->type == NODE_TYPE_CDATA) {
+    if (doc->nodes[node].type == NODE_TYPE_TEXT || doc->nodes[node].type == NODE_TYPE_CDATA) {
         return (struct String) {"#text", sizeof "#text" - 1, false};
     }
-    if (hi->current_node->type == NODE_TYPE_COMMENT) {
+    if (doc->nodes[node].type == NODE_TYPE_COMMENT) {
         return (struct String) {"#comment", sizeof "#comment" - 1, false};
     }
-    char *name = malloc(hi->current_node->name_length);
+    char *name = malloc(doc->nodes[node].name_length);
     if (name == NULL) {
         return NULL_STRING;
     }
-    for (int i = 0; i < hi->current_node->name_length; ++i) {
-        name[i] = tolower(hi->current_node->name_start[i]);
+    for (int i = 0; i < doc->nodes[node].name_length; ++i) {
+        name[i] = tolower(doc->nodes[node].name_start[i]);
     }
-    return (struct String) {name, hi->current_node->name_length, true};
+    return (struct String) {name, doc->nodes[node].name_length, true};
 }
 
-struct String HtmlInspector_get_value(struct HtmlInspector *hi)
+struct String HtmlDocument_get_value(struct HtmlDocument *doc, int node)
 {
-    if (hi->must_iterate) {
-        HtmlInspector_iterate(hi);
-    }
-    if (hi->current_node == NULL) {
+    if (node < 0 || node >= doc->node_count) {
         return NULL_STRING;
     }
-    if (hi->current_node->type == NODE_TYPE_COMMENT || hi->current_node->type == NODE_TYPE_TEXT ||
-            hi->current_node->type == NODE_TYPE_CDATA)
+    if (doc->nodes[node].type == NODE_TYPE_COMMENT || doc->nodes[node].type == NODE_TYPE_TEXT ||
+        doc->nodes[node].type == NODE_TYPE_CDATA)
     {
         struct String value = {
-            (unsigned char *) hi->current_node->value_start,
-            hi->current_node->value_length,
+            (unsigned char *) doc->nodes[node].value_start,
+            doc->nodes[node].value_length,
             false
         };
-        if (hi->current_node->type != NODE_TYPE_CDATA) {
-            HtmlInspector_entities_to_utf8(&value, true);
+        if (doc->nodes[node].type != NODE_TYPE_CDATA) {
+            HtmlDocument_entities_to_utf8(&value, true);
         }
         return value;
     }
     return NULL_STRING;
 }
 
-struct String HtmlInspector_get_attribute(struct HtmlInspector *hi, const char *attribute)
+struct String HtmlDocument_get_attribute(struct HtmlDocument *doc, int node, const char *attribute)
 {
-    if (hi->must_iterate) {
-        HtmlInspector_iterate(hi);
-    }
-    if (hi->current_node == NULL) {
+    if (node < 0 || node >= doc->node_count) {
         return NULL_STRING;
     }
     int strlen_attribute = strlen(attribute);
-    struct Attribute *attributes = &hi->doc->attributes[hi->current_node->attributes_start];
-    for (int i = 0; i < hi->current_node->attributes_count; ++i) {
+    struct Attribute *attributes = &doc->attributes[doc->nodes[node].attributes_start];
+    for (int i = 0; i < doc->nodes[node].attributes_count; ++i) {
         if (attributes[i].name_length == strlen_attribute &&
             !strnicmp(attributes[i].name_start, attribute, attributes[i].name_length))
         {
@@ -1935,14 +1852,14 @@ struct String HtmlInspector_get_attribute(struct HtmlInspector *hi, const char *
                 .length = attributes[i].value_length,
                 .is_malloced = false
             };
-            HtmlInspector_entities_to_utf8(&result, false);
+            HtmlDocument_entities_to_utf8(&result, false);
             return result;
         }
     }
     return NULL_STRING;
 }
 
-static int HtmlInspector_escape(struct String *html, bool attribute_mode)
+static int HtmlDocument_escape(struct String *html, bool attribute_mode)
 {
     // https://dev.w3.org/html5/spec-LC/the-end.html#html-fragment-serialization-algorithm
     // Section: “Escaping a string”
@@ -2019,14 +1936,11 @@ static int HtmlInspector_escape(struct String *html, bool attribute_mode)
     return 0;
 }
 
-static struct String HtmlInspector_get_html(struct HtmlInspector *hi, bool inner)
+static struct String HtmlDocument_get_html(struct HtmlDocument *doc, int node, bool inner)
 {
     // https://dev.w3.org/html5/spec-LC/the-end.html#html-fragment-serialization-algorithm
 
-    if (hi->must_iterate) {
-        HtmlInspector_iterate(hi);
-    }
-    if (hi->current_node == NULL) {
+    if (node < 0 || node >= doc->node_count) {
         return NULL_STRING;
     }
     size_t result_capacity = 1024;
@@ -2044,43 +1958,43 @@ static struct String HtmlInspector_get_html(struct HtmlInspector *hi, bool inner
         memcpy(&result.data[result.length], _data, _length); \
         result.length += _length;
 
-    if (hi->current_node == hi->doc->nodes) {
+    if (node == 0) {
         inner = true;
     }
-    const struct Node *last_node = &hi->doc->nodes[hi->doc->node_count - 1];
-    for (struct Node *node = hi->current_node + inner;
-        node <= last_node &&
-        (node == hi->current_node || node->nesting_level > hi->current_node->nesting_level);
-        ++node)
+    const struct Node *last_node = &doc->nodes[doc->node_count - 1];
+    for (struct Node *n = &doc->nodes[node + inner];
+        n <= last_node &&
+        (n == &doc->nodes[node] || n->nesting_level > doc->nodes[node].nesting_level);
+        ++n)
     {
-        if (node->type == NODE_TYPE_COMMENT) {
+        if (n->type == NODE_TYPE_COMMENT) {
             APPEND("<!--", 4);
-            APPEND(node->value_start, node->value_length);
+            APPEND(n->value_start, n->value_length);
             APPEND("-->", 3);
         }
-        else if (node->type == NODE_TYPE_TEXT || node->type == NODE_TYPE_CDATA) {
-            struct String value = {(char *) node->value_start, node->value_length, false};
-            if (node->type != NODE_TYPE_CDATA) {
-                HtmlInspector_entities_to_utf8(&value, true); // TODO check malloc failure
-                HtmlInspector_escape(&value, false);
+        else if (n->type == NODE_TYPE_TEXT || n->type == NODE_TYPE_CDATA) {
+            struct String value = {(char *) n->value_start, n->value_length, false};
+            if (n->type != NODE_TYPE_CDATA) {
+                HtmlDocument_entities_to_utf8(&value, true); // TODO check malloc failure
+                HtmlDocument_escape(&value, false);
             }
             APPEND(value.data, value.length)
         }
         else {
             APPEND("<", 1);
-            APPEND(node->name_start, node->name_length);
+            APPEND(n->name_start, n->name_length);
 
             // Spec.: “For HTML elements created by the HTML parser […], tagname will be lowercase.”
 
-            for (int i = node->name_length + 1; i >= 1; --i) {
+            for (int i = n->name_length + 1; i >= 1; --i) {
                 result.data[result.length - i] = tolower(result.data[result.length - i]);
             }
 
-            struct Attribute *attribute = &hi->doc->attributes[node->attributes_start];
-            while (attribute < &hi->doc->attributes[node->attributes_start + node->attributes_count]) {
+            struct Attribute *attribute = &doc->attributes[n->attributes_start];
+            while (attribute < &doc->attributes[n->attributes_start + n->attributes_count]) {
                 struct String value = {(char *) attribute->value_start, attribute->value_length, false};
-                HtmlInspector_entities_to_utf8(&value, false); // TODO check malloc failure
-                HtmlInspector_escape(&value, true);
+                HtmlDocument_entities_to_utf8(&value, false); // TODO check malloc failure
+                HtmlDocument_escape(&value, true);
                 APPEND(" ", 1);
                 APPEND(attribute->name_start, attribute->name_length);
 
@@ -2098,16 +2012,16 @@ static struct String HtmlInspector_get_html(struct HtmlInspector *hi, bool inner
             }
             APPEND(">", 1)
         }
-        int preceding_nesting_level = node->nesting_level;
-        int next_nesting_level = node == last_node ||
-            (node + 1)->nesting_level <= hi->current_node->nesting_level - 1 ?
-            hi->current_node->nesting_level : (node + 1)->nesting_level;
+        int preceding_nesting_level = n->nesting_level;
+        int next_nesting_level = n == last_node ||
+            (n + 1)->nesting_level <= doc->nodes[node].nesting_level - 1 ?
+            doc->nodes[node].nesting_level : (n + 1)->nesting_level;
         if (next_nesting_level <= preceding_nesting_level) {
-            struct Node *counterpart = node;
+            struct Node *counterpart = n;
             do {
                 if (counterpart->nesting_level == preceding_nesting_level - 1 ||
                     counterpart->nesting_level == preceding_nesting_level &&
-                    node->type == NODE_TYPE_NONVOID_ELEMENT)
+                    n->type == NODE_TYPE_NONVOID_ELEMENT)
                 {
                     APPEND("</", 2);
                     APPEND(counterpart->name_start, counterpart->name_length);
@@ -2118,7 +2032,7 @@ static struct String HtmlInspector_get_html(struct HtmlInspector *hi, bool inner
                     preceding_nesting_level -= 1;
                 }
                 counterpart -= 1;
-                if (inner && counterpart == hi->current_node) {
+                if (inner && counterpart == &doc->nodes[node]) {
                     break;
                 }
             } while (preceding_nesting_level > next_nesting_level);
@@ -2128,80 +2042,32 @@ static struct String HtmlInspector_get_html(struct HtmlInspector *hi, bool inner
     #undef APPEND
 }
 
-struct String HtmlInspector_get_inner_html(struct HtmlInspector *hi)
+struct String HtmlDocument_get_inner_html(struct HtmlDocument *hi, int node)
 {
-    return HtmlInspector_get_html(hi, true);
+    return HtmlDocument_get_html(hi, node, true);
 }
 
-struct String HtmlInspector_get_outer_html(struct HtmlInspector *hi)
+struct String HtmlDocument_get_outer_html(struct HtmlDocument *hi, int node)
 {
-    return HtmlInspector_get_html(hi, false);
+    return HtmlDocument_get_html(hi, node, false);
 }
 
-void HtmlInspector_set_index(struct HtmlInspector *hi, unsigned int index)
+struct Selector * HtmlDocument_select(struct HtmlDocument *doc, unsigned int index)
 {
-    hi->reference_node = index < hi->doc->node_count ? hi->doc->nodes + index : hi->doc->nodes;
-    hi->current_node = hi->reference_node;
-    hi->must_iterate = false;
-    hi->active_axis = 0;
-    hi->selector_item_count = 0;
-}
-
-int HtmlInspector_get_index(struct HtmlInspector *hi)
-{
-    // Immutable references to nodes are a must-have. And in C code I want them not be malloced.
-    // This means the reference can be an integer or a struct with additionally a pointer to *hi
-    // for a more object-oriented syntax.
-    //
-    // I had considered to keep track of nodes using the `reference_node` of the `HtmlInspector`
-    // struct. But this requires cloning the object for every node reference and the number of
-    // node references in my product search engine is not so small. Moreover, the possibility
-    // of accidential mutation creates a mess.
-
-    if (hi->must_iterate) {
-        HtmlInspector_iterate(hi);
-    }
-    return hi->current_node == NULL ? -1 : hi->current_node - hi->doc->nodes;
-}
-
-int HtmlInspector_get_offset(struct HtmlInspector *hi)
-{
-    if (hi->must_iterate) {
-        HtmlInspector_iterate(hi);
-    }
-    if (hi->current_node == NULL) {
-        return -1;
-    }
-    int offset;
-    if (hi->current_node->type == NODE_TYPE_TEXT || hi->current_node->type == NODE_TYPE_CDATA) {
-        offset = 0;
-    }
-    else if (hi->current_node->type == NODE_TYPE_COMMENT) {
-        offset = -3;
-    }
-    else {
-        offset = -1;
-    }
-    return hi->current_node->name_start - hi->doc->html - offset;
-}
-
-struct HtmlInspector *HtmlInspector_fork(struct HtmlInspector *hi)
-{
-    struct HtmlInspector *fork = malloc(sizeof (struct HtmlInspector));
-    if (fork == NULL) {
+    struct Selector *s = malloc(sizeof (struct Selector));
+    if (s == NULL) {
         return NULL;
     }
-    if (hi->must_iterate) {
-        HtmlInspector_iterate(hi);
-    }
-    fork->doc = hi->doc;
-    fork->doc->references += 1;
-    fork->current_node = hi->current_node;
-    fork->reference_node = hi->current_node;
-    fork->active_axis = 0;
-    fork->must_iterate = false;
-    fork->selector_item_count = 0;
-    return fork;
+    s->selector_item_count = 0;
+    s->doc = doc;
+    s->active_axis = 0;
+    s->reference_node = index < doc->node_count ? doc->nodes + index : doc->nodes;
+    return s;
+}
+
+void Selector_free(struct Selector *hi)
+{
+    free(hi);
 }
 
 /*****************************************************************************/
