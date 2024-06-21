@@ -89,14 +89,13 @@ void benchmark_loading()
     hi = HtmlDocument(html);
     //HtmlDocument_print_stats(hi);
     //HtmlDocument_dump(hi); return;
+    int node = 0;
     clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &start);
     for (i = 0; i < 200; ++i) {
-        hi = HtmlDocument(html);
-        if (hi == NULL) {
-            continue;
-        }
-        HtmlDocument_free(hi);
+        string_free(HtmlDocument_get_outer_html(hi, 0));
     }
+    printf("%d\n", node);
+    HtmlDocument_free(hi);
     clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &end);
 
     long elapsed_nsec = (end.tv_sec - start.tv_sec) * 1e+9 + (end.tv_nsec - start.tv_nsec);
@@ -293,8 +292,8 @@ void test_outer_html()
 
 int main()
 {
-    test_outer_html();
-    //benchmark_loading();
+    //test_outer_html();
+    benchmark_loading();
     //benchmark_resolve_url();
     //test_url_join();
     //test_entities_to_utf8();

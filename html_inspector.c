@@ -409,19 +409,7 @@ void HtmlDocument_normalize_space(struct String *input)
 
 void HtmlDocument_entities_to_utf8(struct String *input, bool skip_stray_tags)
 {
-    struct String result = (struct String) {
-        .data = malloc(input->length),
-        .length = 0,
-        .is_malloced = true
-    };
-    if (result.data == NULL) {
-        if (input->is_malloced) {
-            free(input->data);
-        }
-        *input = NULL_STRING;
-        return;
-    }
-
+    char result[input->length];
     int i, k;
 
     for (i = 0; i < input->length; ++i) {
@@ -432,8 +420,8 @@ void HtmlDocument_entities_to_utf8(struct String *input, bool skip_stray_tags)
             continue;
         }
         if (input->data[i] != '&') {
-            result.data[result.length] = input->data[i];
-            result.length += 1;
+            result[length] = input->data[i];
+            length += 1;
             continue;
         }
         if (input->data[i + 1] == '#') {
@@ -470,7 +458,7 @@ void HtmlDocument_entities_to_utf8(struct String *input, bool skip_stray_tags)
                 codepoint = -1;
             }
             if (codepoint == -1) {
-                result.data[result.length++] = '&';
+                result[length++] = '&';
                 continue;
             }
             i += k;
@@ -478,37 +466,37 @@ void HtmlDocument_entities_to_utf8(struct String *input, bool skip_stray_tags)
             // See `man utf-8`
 
             if (codepoint <= 0x7F) {
-                result.data[result.length++] = codepoint;
+                result[length++] = codepoint;
             }
             else if (codepoint <= 0x7FF) {
-                result.data[result.length++] = 0b11000000 + (codepoint >> 6);
-                result.data[result.length++] = (10 << 6) + (codepoint & 0b111111);
+                result[length++] = 0b11000000 + (codepoint >> 6);
+                result[length++] = (10 << 6) + (codepoint & 0b111111);
             }
             else if (codepoint <= 0xFFFF) {
-                result.data[result.length++] = 0b11100000 + (codepoint >> 12);
-                result.data[result.length++] = (10 << 6) + ((codepoint >> 6) & 0b111111);
-                result.data[result.length++] = (10 << 6) + (codepoint & 0b111111);
+                result[length++] = 0b11100000 + (codepoint >> 12);
+                result[length++] = (10 << 6) + ((codepoint >> 6) & 0b111111);
+                result[length++] = (10 << 6) + (codepoint & 0b111111);
             }
             else if (codepoint <= 0x1FFFFF) {
-                result.data[result.length++] = 0b11110000 + (codepoint >> 18);
-                result.data[result.length++] = (10 << 6) + ((codepoint >> 12) & 0b111111);
-                result.data[result.length++] = (10 << 6) + ((codepoint >> 6) & 0b111111);
-                result.data[result.length++] = (10 << 6) + (codepoint & 0b111111);
+                result[length++] = 0b11110000 + (codepoint >> 18);
+                result[length++] = (10 << 6) + ((codepoint >> 12) & 0b111111);
+                result[length++] = (10 << 6) + ((codepoint >> 6) & 0b111111);
+                result[length++] = (10 << 6) + (codepoint & 0b111111);
             }
             else if (codepoint <= 0x03FFFFFF) {
-                result.data[result.length++] = 0b11111000 + (codepoint >> 24);
-                result.data[result.length++] = (10 << 6) + ((codepoint >> 18) & 0b111111);
-                result.data[result.length++] = (10 << 6) + ((codepoint >> 12) & 0b111111);
-                result.data[result.length++] = (10 << 6) + ((codepoint >> 6) & 0b111111);
-                result.data[result.length++] = (10 << 6) + (codepoint & 0b111111);
+                result[length++] = 0b11111000 + (codepoint >> 24);
+                result[length++] = (10 << 6) + ((codepoint >> 18) & 0b111111);
+                result[length++] = (10 << 6) + ((codepoint >> 12) & 0b111111);
+                result[length++] = (10 << 6) + ((codepoint >> 6) & 0b111111);
+                result[length++] = (10 << 6) + (codepoint & 0b111111);
             }
             else if (codepoint <= 0x7FFFFFFF) {
-                result.data[result.length++] = 0b1111110 + (codepoint >> 30);
-                result.data[result.length++] = (10 << 6) + ((codepoint >> 24) & 0b111111);
-                result.data[result.length++] = (10 << 6) + ((codepoint >> 18) & 0b111111);
-                result.data[result.length++] = (10 << 6) + ((codepoint >> 12) & 0b111111);
-                result.data[result.length++] = (10 << 6) + ((codepoint >> 6) & 0b111111);
-                result.data[result.length++] = (10 << 6) + (codepoint & 0b111111);
+                result[length++] = 0b1111110 + (codepoint >> 30);
+                result[length++] = (10 << 6) + ((codepoint >> 24) & 0b111111);
+                result[length++] = (10 << 6) + ((codepoint >> 18) & 0b111111);
+                result[length++] = (10 << 6) + ((codepoint >> 12) & 0b111111);
+                result[length++] = (10 << 6) + ((codepoint >> 6) & 0b111111);
+                result[length++] = (10 << 6) + (codepoint & 0b111111);
             }
             continue;
         }
@@ -517,38 +505,29 @@ void HtmlDocument_entities_to_utf8(struct String *input, bool skip_stray_tags)
             entity[k] = input->data[i + k];
         }
         if (i + k == input->length && input->data[i + k] != ';') {
-            result.data[result.length++] = '&';
+            result[length++] = '&';
             continue;
         }
         entity[k++] = ';';
         entity[k] = '\0';
         const char *pos = strstr(ENTITIES[entity[1]], entity);
         if (pos == NULL) {
-            result.data[result.length++] = '&';
+            result[length++] = '&';
             continue;
         }
         i += k - 1;
         if (pos[k] == '&') {  // Special case for the &amp; entity
-            result.data[result.length++] = '&';
+            result[length++] = '&';
         }
         while (pos[k] != '&' && pos[k] != '\0') {
-            result.data[result.length++] = pos[k];
+            result[length++] = pos[k];
             k += 1;
         }
     }
-    if (input->is_malloced) {
-        free(input->data);
+    if (input->length != length) {
+        *input = {malloc(length), length, true};
+        memcpy(input->data, result, length);
     }
-    if (input->length != result.length) {
-        char *realloced = realloc(result.data, result.length);
-        if (realloced == NULL) {
-            free(result.data);
-            *input = NULL_STRING;
-            return;
-        }
-        result.data = realloced;
-    }
-    *input = result;
 }
 
 void string_free(struct String string)
