@@ -39,6 +39,19 @@ used.
 
 ### PHP
 
+### About PHP iterators
+
+I have thought back and forth whether to implement PHP iterators to loop through nodes. How PHP
+implements iterators is awkward. Firstly, two redundant implementations are needed to support
+looping with `foreach` and to implement the `Iterator` interface. Secondly, it needs the two
+methods `next` (with no return value) and `current` instead of just one, we have to implement a
+caching of both the current value and of the validity state of the iterator, and in `current` we
+conditionally have have to make one implicit iteration. Python is an example where iteration is
+implemented more elegantly using a single `__next__` method that both iterates and then returns the
+current value. Another complication is how to encode the non-existennce of a node. With PHP iterators,
+we need to use the value `false` and implement union type hints and a respective check for the `get_*`
+methods. Without iterators, we can use the value `-1` and pass it to the C functions.
+
 PHP bindings exist. Example to extract all links of a document using the PHP bindings:
 
 ```
@@ -46,13 +59,15 @@ PHP bindings exist. Example to extract all links of a document using the PHP bin
 
 function extract_anchors(string $html_utf8, string $document_uri)
 {
-    $hi = new HtmlInspector($html_utf8);
-    $base = $hi->child()->name('html')->child()->name('head')->child()->name('base')->get_attribute('href');
-    $base = HtmlInspector::resolve_iri_to_uri($base, $document_uri);
-    $hi->reset()->descendant()->name('a')->attribute_starts_with('#')->not();
-    while ($hi->iterate()) {
-        $href = $hi->get_attribute('href');
-        $uri = HtmlInspector::resolve_iri_to_uri($href, $base);
+    $doc = new HtmlInspector\HtmlDocument($html_utf8);
+    $base = $doc->select(0)->child()->name('html')->child()->name('head')->child()
+        ->name('base')->current();
+    $base = $doc->get_attribute($base, 'href');
+    $base = HtmlInspector\resolve_iri_to_uri($base, $document_uri);
+    $selector = $doc->select(0)->descendant()->name('a')->attribute_starts_with('#')->not();
+    while (($node_a = $selector->iterate()) !== -1) {
+        $href = $hi->get_attribute($node_a, 'href');
+        $uri = HtmlInspector\resolve_iri_to_uri($href, $base);
         print("$uri\n");
     }
 }

@@ -37,6 +37,7 @@ void HtmlDocument_dump(struct HtmlDocument *doc)
         node += 1;
     }
 }
+
 void HtmlDocument_print_stats(struct HtmlDocument *doc)
 {
     int attributes_count = 0;
