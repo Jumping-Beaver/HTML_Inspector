@@ -4,11 +4,7 @@
 function benchmark_HtmlInspector()
 {
     $html = file_get_contents('../test-html.html');
-    $hi = new HtmlDocument($html);
-    foreach ($hi->select(0) as $node) {
-        var_dump($node);
-    }
-    exit;
+
     $time = microtime(true);
     $num = 0;
     for ($i = 0; $i < 100; ++$i) {

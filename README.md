@@ -20,15 +20,11 @@ See also: `https://wiki.php.net/rfc/domdocument_html5_parser`
 
 Selectors are implemented using a stack of operations, which fall into two categories: iterators
 along axes of the node tree, and filters. Boolean operations (and, or, not) on filters are
-implemented using postfix notation. “and” operations are appended implicitly to chained filters. To
-minimise the number of memory allocations, this library does not expose nodes as separate objects.
-Instead, each `HtmlInspector` object internally points to a “current node” that can be changed by
-iterating the selector. The state of the iteration can be preserved by cloning the instance using
-the “fork(…)” method.
+implemented using postfix notation. “and” operations are appended implicitly to chained filters.
 
-`iterate(…)` is called automatically when calling a `get_…` method without having iterated before.
-
-`reset(…)` deletes the selector.
+Nodes are represented by integers. Node `0` is the always present `#document` node. A node value
+of `-1` is returned by `iterate()` is the iterator is exhausted. Passing `-1` or other non-existent
+node references to the `get_*` methods returns null.
 
 ### C
 
@@ -37,22 +33,9 @@ In C you can `#include "html_inspector.c"` to statically compile the library int
 The HTML input must remain allocated and immutable as along as the `HtmlInspector` instance is
 used.
 
-### PHP
+### PHP bindings
 
-### About PHP iterators
-
-I have thought back and forth whether to implement PHP iterators to loop through nodes. How PHP
-implements iterators is awkward. Firstly, two redundant implementations are needed to support
-looping with `foreach` and to implement the `Iterator` interface. Secondly, it needs the two
-methods `next` (with no return value) and `current` instead of just one, we have to implement a
-caching of both the current value and of the validity state of the iterator, and in `current` we
-conditionally have have to make one implicit iteration. Python is an example where iteration is
-implemented more elegantly using a single `__next__` method that both iterates and then returns the
-current value. Another complication is how to encode the non-existennce of a node. With PHP iterators,
-we need to use the value `false` and implement union type hints and a respective check for the `get_*`
-methods. Without iterators, we can use the value `-1` and pass it to the C functions.
-
-PHP bindings exist. Example to extract all links of a document using the PHP bindings:
+Example code:
 
 ```
 <?php
@@ -60,46 +43,18 @@ PHP bindings exist. Example to extract all links of a document using the PHP bin
 function extract_anchors(string $html_utf8, string $document_uri)
 {
     $doc = new HtmlInspector\HtmlDocument($html_utf8);
-    $base = $doc->select(0)->child()->name('html')->child()->name('head')->child()
-        ->name('base')->current();
-    $base = $doc->get_attribute($base, 'href');
+    $node_base = $doc->select(0)->child()->name('html')->child()->name('head')->child()
+        ->name('base')->iterate();
+    $base = $doc->get_attribute($node_base, 'href');
     $base = HtmlInspector\resolve_iri_to_uri($base, $document_uri);
     $selector = $doc->select(0)->descendant()->name('a')->attribute_starts_with('#')->not();
     while (($node_a = $selector->iterate()) !== -1) {
-        $href = $hi->get_attribute($node_a, 'href');
+        $href = $doc->get_attribute($node_a, 'href');
         $uri = HtmlInspector\resolve_iri_to_uri($href, $base);
         print("$uri\n");
     }
 }
 ```
-
-## How is the fast performance achieved?
-
-- Conceptually: Only two contiguous memory blocks store the parsed document: a list
-  of nodes and a list of attributes. Other parsers make thousands of memory allocations to
-  build a tree data structure.
-
-- Conceptually: Data queries use lazy evaluation for the iteration over nodes and for the decoding of HTML
-  entities to UTF-8.
-
-- Most essential implementation detail: The parser maintains a stack of unclosed tags to match them
-  quickly. Looping backwards through the whole node list to find them is very slow.
-
-- The named HTML entities are indexed by their first character.
-
-- Trivial but significant: Storing the `sizeof` value instead of calling `strlen` to get the length of
-  hard-coded tag names.
-
-## What makes HTML difficult to parse?
-
-HTML is an overly complex format that is painful to parse.
-
-One drawback is the large list of named entities. In the age of Unicode, most are unneeded.
-
-Having to support both decimal and hexadecimal entities is an unneeded complexity.
-
-Another bummer is optional starting and closing tags. They require a large amount of code to
-handle and make it less performant and more difficult to retrieve the HTML content of a node.
 
 ## Scope
 
@@ -171,6 +126,48 @@ Out of scope:
 
   Chrome does by default not (always) show decoded domain names in the address bar, and in Firefox
   I recommend to set `network.IDN_show_punycode` to `true`.
+
+### About PHP iterators
+
+I have thought back and forth whether to implement PHP iterators to loop through nodes. How PHP
+implements iterators is awkward. Firstly, two redundant implementations are needed to support
+looping with `foreach` and to implement the `Iterator` interface. Moreover, it needs the two
+methods `next` (with no return value) and `current` instead of just one, we have to implement a
+caching of both the current value and of the validity state of the iterator, and in `current` we
+conditionally have have to make one implicit iteration. Python is an example where iteration is
+implemented more elegantly using a single `__next__` method that both iterates and then returns the
+current value. Another complication is how to encode the non-existence of a node. With PHP iterators,
+we need to use the value `false` and implement union type hints and a respective check for the `get_*`
+methods to enable a concise syntax. Without iterators, we can use the value `-1` and pass it to the
+C functions without further checks.
+
+## How is the fast performance achieved?
+
+- Conceptually: Only two contiguous memory blocks store the parsed document: a list
+  of nodes and a list of attributes. Other parsers make thousands of memory allocations to
+  build a tree data structure.
+
+- Conceptually: Data queries use lazy evaluation for the iteration over nodes and for the decoding of HTML
+  entities to UTF-8.
+
+- Most essential implementation detail: The parser maintains a stack of unclosed tags to match them
+  quickly. Looping backwards through the whole node list to find them is very slow.
+
+- The named HTML entities are indexed by their first character.
+
+## What makes HTML difficult to parse?
+
+A large amount of complexity stems from the error tolerance that browsers implement, which results
+in the quality degradation of real-world HTML markup. Admittedly, there may be some need of error
+tolerance for historical reasons but generally strictness is a better practice.
+
+One drawback is the large list of named entities. In the age of Unicode, most are unneeded.
+
+Having to support both decimal and hexadecimal entities is an unneeded complexity.
+
+Another bummer is optional starting and closing tags. They require a large amount of code to
+handle.
+
 
 ## Exploration to optimize the memory allocator of LibXML2
 

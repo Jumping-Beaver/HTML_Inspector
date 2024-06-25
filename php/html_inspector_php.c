@@ -12,9 +12,26 @@ struct html_inspector_object {
 
 struct selector_object {
     struct Selector *s;
-    int current_node;
     zend_object std;
 };
+
+static zend_object_handlers object_handlers_html_inspector, object_handlers_selector;
+
+static zend_object * create_object_html_inspector(zend_class_entry *ce)
+{
+    struct html_inspector_object *this = zend_object_alloc(sizeof (struct html_inspector_object), ce);
+    zend_object_std_init(&this->std, ce);
+    this->std.handlers = &object_handlers_html_inspector;
+    return &this->std;
+}
+
+static zend_object * create_object_selector(zend_class_entry *ce)
+{
+    struct selector_object *this = zend_object_alloc(sizeof (struct selector_object), ce);
+    zend_object_std_init(&this->std, ce);
+    this->std.handlers = &object_handlers_selector;
+    return &this->std;
+}
 
 #define HTML_INSPECTOR(this) \
     ((struct html_inspector_object *) ((char *) (this)->value.obj - offsetof(struct html_inspector_object, std)))->hi
@@ -22,20 +39,17 @@ struct selector_object {
 #define SELECTOR(this) \
     ((struct selector_object *) ((char *) (this)->value.obj - offsetof(struct selector_object, std)))->s
 
-#define SELECTOR_CURRENT_NODE(this) \
-    ((struct selector_object *) ((char *) (this)->value.obj - offsetof(struct selector_object, std)))->current_node
-
 ZEND_METHOD(HtmlDocument, resolve_iri_to_uri)
 {
     zend_string *reference;
     zend_string *base;
-    ZEND_PARSE_PARAMETERS_START(1, 1)
+    ZEND_PARSE_PARAMETERS_START(2, 2)
         Z_PARAM_STR(reference)
         Z_PARAM_STR(base)
     ZEND_PARSE_PARAMETERS_END();
 
-    struct String _base = {base->val, reference->len, false};
-    struct String _reference = {base->val, reference->len, false};
+    struct String _base = {base->val, base->len, false};
+    struct String _reference = {reference->val, reference->len, false};
     struct String uri = HtmlInspector_resolve_iri_to_uri(_reference, _base);
     ZVAL_STRINGL(return_value, uri.data, uri.length);
     string_free(uri);
@@ -133,37 +147,6 @@ ZEND_METHOD(Selector, rewind)
     Selector_rewind(SELECTOR(&execute_data->This));
 }
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO(arginfo_rewind, IS_VOID, false)
-ZEND_END_ARG_INFO()
-
-ZEND_METHOD(Selector, current)
-{
-    ZEND_PARSE_PARAMETERS_NONE();
-    int *current_node = &SELECTOR_CURRENT_NODE(&execute_data->This);
-    if (*current_node == -2) {
-        *current_node = Selector_iterate(SELECTOR(&execute_data->This));
-    }
-    if (*current_node == -1) {
-        ZVAL_FALSE(return_value);
-        return;
-    }
-    ZVAL_LONG(return_value, *current_node);
-}
-ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO(arginfo_current, IS_MIXED, false)
-ZEND_END_ARG_INFO()
-
-ZEND_METHOD(Selector, next)
-{
-    ZEND_PARSE_PARAMETERS_NONE();
-    Selector_iterate(SELECTOR(&execute_data->This));
-}
-ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO(arginfo_next, IS_VOID, false)
-ZEND_END_ARG_INFO()
-
-ZEND_METHOD(Selector, isValid)
-{
-    ZEND_PARSE_PARAMETERS_NONE();
-}
-ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO(arginfo_isValid, _IS_BOOL, false)
 ZEND_END_ARG_INFO()
 
 ZEND_METHOD(Selector, __destruct)
@@ -447,97 +430,13 @@ ZEND_METHOD(HtmlDocument, select)
         zend_throw_error(NULL, "malloc failed", 0);
         return;
     }
-    ZVAL_OBJ(return_value, zend_objects_new(class_entry_selector));
+    zend_object *object = create_object_selector(class_entry_selector);
+    ZVAL_OBJ_COPY(return_value, object);
     SELECTOR(return_value) = s;
-    SELECTOR_CURRENT_NODE(return_value) = -2;
 }
 ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_select, Selector, false)
     ZEND_ARG_TYPE_INFO(0, node, IS_LONG, false)
 ZEND_END_ARG_INFO()
-
-/******************************************************************************/
-
-static zend_object_handlers object_handlers_html_inspector, object_handlers_selector;
-
-static zend_object * create_object_html_inspector(zend_class_entry *ce)
-{
-    struct html_inspector_object *this = zend_object_alloc(sizeof (struct html_inspector_object), ce);
-    zend_object_std_init(&this->std, ce);
-    this->std.handlers = &object_handlers_html_inspector;
-    return &this->std;
-}
-
-static zend_object * create_object_selector(zend_class_entry *ce)
-{
-    struct selector_object *this = zend_object_alloc(sizeof (struct selector_object), ce);
-    zend_object_std_init(&this->std, ce);
-    this->std.handlers = &object_handlers_selector;
-    return &this->std;
-}
-/************************/
-
-struct selector_iterator {
-    zend_object_iterator intern;
-    struct Selector *selector;
-    int is_valid;
-    zval *current;
-};
-
-static void selector_iterator_dtor(zend_object_iterator *intern)
-{
-    zval_ptr_dtor(&intern->data);
-    zval_ptr_dtor(((struct selector_iterator *) intern)->current);
-}
-
-static int selector_iterator_valid(zend_object_iterator *intern)
-{
-    return ((struct selector_iterator *) intern)->is_valid;
-}
-
-static zval *selector_iterator_current_data(zend_object_iterator *intern)
-{
-    printf("current\n");
-    return ((struct selector_iterator *) intern)->current;
-}
-
-static void selector_iterator_move_forward(zend_object_iterator *intern)
-{
-    printf("move\n");
-    struct selector_iterator *it = (struct selector_iterator *) intern;
-    ZVAL_LONG(it->current, Selector_iterate(it->selector));
-    it->is_valid = it->current->value.lval != -1;
-}
-
-static void selector_iterator_rewind(zend_object_iterator *intern)
-{
-    Selector_rewind(((struct selector_iterator *) intern)->selector);
-}
-
-static zend_object_iterator_funcs selector_iterator_funcs = {
-    selector_iterator_dtor,
-    selector_iterator_valid,
-    selector_iterator_current_data,
-    NULL,
-    selector_iterator_move_forward,
-    selector_iterator_rewind
-};
-
-zend_object_iterator *selector_get_iterator(zend_class_entry *ce, zval *object, int by_ref)
-{
-    printf("get\n");
-    if (by_ref) {
-        zend_throw_error(NULL, "Cannot iterate by reference", 0);
-        return NULL;
-    }
-    struct selector_iterator *it = emalloc(sizeof (struct selector_iterator));
-    zend_iterator_init(&it->intern);
-    it->intern.funcs = &selector_iterator_funcs;
-    it->current = NULL;
-    printf("gettti\n");
-    return &it->intern;
-}
-
-/***********************/
 
 zend_function_entry functions_HtmlDocument[] = {
     ZEND_ME(HtmlDocument, resolve_iri_to_uri, arginfo_resolve_iri_to_uri, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
@@ -560,12 +459,7 @@ zend_function_entry functions_Selector[] = {
     ZEND_ME(Selector, nth, arginfo_nth, ZEND_ACC_PUBLIC)
     ZEND_ME(Selector, name, arginfo_name, ZEND_ACC_PUBLIC)
     ZEND_ME(Selector, child, arginfo_child, ZEND_ACC_PUBLIC)
-
     ZEND_ME(Selector, rewind, arginfo_rewind, ZEND_ACC_PUBLIC)
-    ZEND_ME(Selector, current, arginfo_current, ZEND_ACC_PUBLIC)
-    ZEND_ME(Selector, next, arginfo_next, ZEND_ACC_PUBLIC)
-    ZEND_ME(Selector, isValid, arginfo_isValid, ZEND_ACC_PUBLIC)
-
     ZEND_ME(Selector, iterate, arginfo_iterate, ZEND_ACC_PUBLIC)
     ZEND_ME(Selector, ancestor, arginfo_ancestor, ZEND_ACC_PUBLIC)
     ZEND_ME(Selector, descendant, arginfo_descendant, ZEND_ACC_PUBLIC)
@@ -595,11 +489,8 @@ PHP_MINIT_FUNCTION(html_inspector_minit)
     INIT_CLASS_ENTRY(ce, "Selector", functions_Selector);
     class_entry_selector = zend_register_internal_class(&ce);
     class_entry_selector->create_object = create_object_selector;
-    class_entry_selector->get_iterator = selector_get_iterator;
     memcpy(&object_handlers_selector, &std_object_handlers, sizeof (zend_object_handlers));
     object_handlers_selector.offset = offsetof(struct selector_object, std);
-
-    zend_class_implements(class_entry_selector, 1, zend_ce_iterator);
 
     return SUCCESS;
 }

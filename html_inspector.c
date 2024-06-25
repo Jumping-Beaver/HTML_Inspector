@@ -1799,6 +1799,9 @@ void HtmlDocument_reset(struct Selector *hi)
 
 struct String HtmlDocument_get_name(struct HtmlDocument *doc, int node)
 {
+    if (node < 0 || node >= doc->node_count) {
+        return NULL_STRING;
+    }
     if (doc->nodes[node].type == NODE_TYPE_TEXT || doc->nodes[node].type == NODE_TYPE_CDATA) {
         return (struct String) {"#text", sizeof "#text" - 1, false};
     }
