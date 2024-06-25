@@ -1,7 +1,7 @@
 CFLAGS := -O2 -fshort-enums -Werror
 
-build/hi_test: hi_test.c html_inspector.c
-	gcc $(CFLAGS) hi_test.c -o "$@"
+build/test: test.c html_inspector.c
+	gcc $(CFLAGS) test.c -o "$@"
 
 entities:
 	./entities_download.sh

@@ -5,7 +5,7 @@
 #include <string.h>
 #include "html_inspector.c"
 
-void HtmlDocument_dump(struct HtmlDocument *doc)
+static void HtmlDocument_dump(struct HtmlDocument *doc)
 {
     struct Node *node = doc->nodes;
     while (node < &doc->nodes[doc->node_count]) {
@@ -38,7 +38,7 @@ void HtmlDocument_dump(struct HtmlDocument *doc)
     }
 }
 
-void HtmlDocument_print_stats(struct HtmlDocument *doc)
+static void HtmlDocument_print_stats(struct HtmlDocument *doc)
 {
     int attributes_count = 0;
     int max_nesting_level = 0;
@@ -58,7 +58,7 @@ void HtmlDocument_print_stats(struct HtmlDocument *doc)
     printf("Size of data structures: %d bytes\n", memory);
 }
 
-char * read_test_file()
+static char * read_test_file()
 {
     FILE *file = fopen("test-html.html", "r");
     fseek(file, 0, SEEK_END);
@@ -70,7 +70,7 @@ char * read_test_file()
     return html;
 }
 
-void test_charset()
+static void test_extract_charset()
 {
     unsigned char html[] = "<meta content = 'text/html; charset=&quot;iso-8859-1\"' http-equiv='CONtent-typ&#69;'>";
     struct String charset = HtmlDocument_extract_charset(html);
@@ -81,9 +81,9 @@ void test_charset()
     printf("Charset: %.*s\n", charset.length, charset.data);
 }
 
-void benchmark_loading()
+static void benchmark()
 {
-    char *html = read_test_file();
+    const char *html = read_test_file();
     int i;
     struct timespec start, end;
     struct HtmlDocument *hi;
@@ -103,23 +103,7 @@ void benchmark_loading()
     printf("Time: %f per second\n", 1e+9 * i / elapsed_nsec);
 }
 
-void benchmark_resolve_url()
-{
-    struct String base = STRING("https://www.example.org:443/b/c/d;p?q");
-    struct String reference = STRING("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
-    struct timespec start, end;
-    clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &start);
-    int i;
-    for (i = 0; i < 500000; ++i) {
-        struct String target = HtmlInspector_resolve_iri_to_uri(reference, base);
-        string_free(target);
-    }
-    clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &end);
-    long elapsed_nsec = (end.tv_sec - start.tv_sec) * 1e+9 + (end.tv_nsec - start.tv_nsec);
-    printf("Time: %f per second\n", 1e+9 * i / elapsed_nsec);
-}
-
-void test_url_join()
+static void test_resolve_iri()
 {
     // TODO: Rename string to charseq?
     struct String base = STRING("http://a/b/c/d;p?q");
@@ -187,7 +171,7 @@ void test_url_join()
 
     };
     for (int i = 0; i < sizeof test_cases / sizeof *test_cases; ++i) {
-        struct String target = HtmlInspector_resolve_iri_to_uri(test_cases[i].relative, test_cases[i].base);
+        struct String target = resolve_iri(test_cases[i].relative, test_cases[i].base);
         if (target.length != test_cases[i].target.length ||
             strncmp(target.data, test_cases[i].target.data, target.length))
         {
@@ -198,7 +182,7 @@ void test_url_join()
     }
 }
 
-void test_entities_to_utf8()
+static void test_entities_to_utf8()
 {
     char cstring[] =
         "&auml;sdluifaiuocvbfgqoiwcuhfqnoifueoiuhnqoiefquhefo &quot; &alpha; "
@@ -214,7 +198,7 @@ void test_entities_to_utf8()
     string_free(string);
 }
 
-void test_normalize_space()
+static void test_normalize_space()
 {
     struct String string = STRING("    asldkfas\n\nl  \r  dk→ø↓ſ€¶fjöasldfjö a         ");
     HtmlDocument_normalize_space(&string);
@@ -222,35 +206,7 @@ void test_normalize_space()
     string_free(string);
 }
 
-void test_get_hrefs()
-{
-    char *html = read_test_file();
-    struct HtmlDocument *doc = HtmlDocument(html);
-    struct Selector *s = HtmlDocument_select(doc, 0);
-    Selector_descendant(s);
-    Selector_name(s, "a");
-    Selector_attribute_equals(s, "href", "#");
-    Selector_not(s);
-    Selector_attribute_starts_with(s, "href", "javascript:");
-    Selector_not(s);
-    int count = 0;
-    int node;
-    while ((node = Selector_iterate(s)) != -1) {
-        struct String href = HtmlDocument_get_attribute(doc, node, "href");
-        struct String uri = href;// HtmlDocument_resolve_iri_to_uri(href, STRING("http://example.org"));
-        //struct String href = HtmlDocument_get_name(doc);
-        printf("%.*s\n", uri.length, uri.data);
-        string_free(href);
-        count += 1;
-        //string_free(uri);
-    }
-    printf("Extracted %d links\n", count);
-    HtmlDocument_free(doc);
-    Selector_free(s);
-    free(html);
-}
-
-void test_outer_html()
+static void test_outer_html()
 {
     // TODO: Insert empty head or not?
     struct {
@@ -294,12 +250,10 @@ void test_outer_html()
 int main()
 {
     //test_outer_html();
-    benchmark_loading();
-    //benchmark_resolve_url();
-    //test_url_join();
+    benchmark();
+    //test_extract_charset();
+    //test_resolve_iri();
     //test_entities_to_utf8();
-    //test_attribute();
-    //test_get_hrefs();
     //test_normalize_space();
     return 0;
 }

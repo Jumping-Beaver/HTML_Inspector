@@ -8,10 +8,10 @@ function benchmark_HtmlInspector()
     $time = microtime(true);
     $num = 0;
     for ($i = 0; $i < 100; ++$i) {
-        $hi = new HtmlDocument($html);
-        $selector = $hi->select(0)->descendant()->name('a');
+        $doc = new HtmlInspector\HtmlDocument($html);
+        $selector = $doc->select(0)->descendant()->name('a');
         while (($node = $selector->iterate()) != -1) {
-            $href = $hi->get_attribute($node, 'href');
+            $href = $doc->get_attribute($node, 'href');
             $num += strlen($href);
         }
     }

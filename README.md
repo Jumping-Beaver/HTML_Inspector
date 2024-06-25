@@ -46,11 +46,11 @@ function extract_anchors(string $html_utf8, string $document_uri)
     $node_base = $doc->select(0)->child()->name('html')->child()->name('head')->child()
         ->name('base')->iterate();
     $base = $doc->get_attribute($node_base, 'href');
-    $base = HtmlInspector\resolve_iri_to_uri($base, $document_uri);
+    $base = HtmlInspector\resolve_iri($base, $document_uri);
     $selector = $doc->select(0)->descendant()->name('a')->attribute_starts_with('#')->not();
     while (($node_a = $selector->iterate()) !== -1) {
         $href = $doc->get_attribute($node_a, 'href');
-        $uri = HtmlInspector\resolve_iri_to_uri($href, $base);
+        $uri = HtmlInspector\resolve_iri($href, $base);
         print("$uri\n");
     }
 }
