@@ -1426,7 +1426,7 @@ static bool str_contains(const char *haystack, size_t haystack_length, const cha
         if (is_word && hi > 0 && !CHARMASK_WHITESPACE[haystack[hi - 1]]) {
             continue;
         }
-        if (diff = haystack[hi] - needle[ni] && case_i) {
+        if ((diff = haystack[hi] - needle[ni]) && case_i) {
             if ((unsigned char) (haystack[hi] - 'A') <= 'Z' - 'A') {
                 diff += 'a' - 'A';
             }
