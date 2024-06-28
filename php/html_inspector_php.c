@@ -2,8 +2,8 @@
 #include <zend_interfaces.h>
 #include "html_inspector.c"
 
-static zend_class_entry *class_entry_html_document;
-static zend_class_entry *class_entry_selector;
+static zend_class_entry *class_entry_html_document, *class_entry_selector;
+static zend_object_handlers object_handlers_html_document, object_handlers_selector;
 
 struct HtmlDocumentObject {
     struct HtmlDocument *doc;
@@ -14,8 +14,6 @@ struct SelectorObject {
     struct Selector *sel;
     zend_object std;
 };
-
-static zend_object_handlers object_handlers_html_document, object_handlers_selector;
 
 static zend_object * create_object_html_document(zend_class_entry *ce)
 {
@@ -51,10 +49,14 @@ ZEND_FUNCTION(resolve_iri)
     struct String _base = {base->val, base->len, false};
     struct String _reference = {reference->val, reference->len, false};
     struct String uri = resolve_iri(_reference, _base);
+    if (uri.data == NULL) {
+        ZVAL_NULL(return_value);
+        return;
+    }
     ZVAL_STRINGL(return_value, uri.data, uri.length);
     string_free(uri);
 }
-ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO(arginfo_resolve_iri, IS_STRING, false)
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO(arginfo_resolve_iri, IS_STRING, true)
     ZEND_ARG_TYPE_INFO(0, reference, IS_STRING, false)
     ZEND_ARG_TYPE_INFO(0, base, IS_STRING, false)
 ZEND_END_ARG_INFO()
@@ -242,7 +244,7 @@ ZEND_METHOD(HtmlDocument, select)
     ZVAL_OBJ_COPY(return_value, object);
     SELECTOR(return_value) = sel;
 }
-ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_select, Selector, false)
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_select, HtmlInspector\\Selector, false)
     ZEND_ARG_TYPE_INFO(0, node, IS_LONG, false)
 ZEND_END_ARG_INFO()
 
@@ -263,7 +265,7 @@ ZEND_METHOD(Selector, nth)
     Selector_nth(SELECTOR(ZEND_THIS), n);
     ZVAL_OBJ_COPY(return_value, Z_OBJ_P(ZEND_THIS));
 }
-ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_nth, Selector, false)
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_nth, HtmlInspector\\Selector, false)
     ZEND_ARG_TYPE_INFO(0, n, IS_LONG, false)
 ZEND_END_ARG_INFO()
 
@@ -273,7 +275,7 @@ ZEND_METHOD(Selector, child)
     Selector_child(SELECTOR(ZEND_THIS));
     ZVAL_OBJ_COPY(return_value, Z_OBJ_P(ZEND_THIS));
 }
-ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_child, Selector, false)
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_child, HtmlInspector\\Selector, false)
 ZEND_END_ARG_INFO()
 
 ZEND_METHOD(Selector, name)
@@ -285,7 +287,7 @@ ZEND_METHOD(Selector, name)
     Selector_name(SELECTOR(ZEND_THIS), name->val);
     ZVAL_OBJ_COPY(return_value, Z_OBJ_P(ZEND_THIS));
 }
-ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_name, Selector, false)
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_name, HtmlInspector\\Selector, false)
     ZEND_ARG_TYPE_INFO(0, name, IS_STRING, false)
 ZEND_END_ARG_INFO()
 
@@ -311,7 +313,7 @@ ZEND_METHOD(Selector, ancestor)
     Selector_ancestor(SELECTOR(ZEND_THIS));
     ZVAL_OBJ_COPY(return_value, Z_OBJ_P(ZEND_THIS));
 }
-ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_ancestor, Selector, false)
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_ancestor, HtmlInspector\\Selector, false)
 ZEND_END_ARG_INFO()
 
 ZEND_METHOD(Selector, descendant)
@@ -320,7 +322,7 @@ ZEND_METHOD(Selector, descendant)
     Selector_descendant(SELECTOR(ZEND_THIS));
     ZVAL_OBJ_COPY(return_value, Z_OBJ_P(ZEND_THIS));
 }
-ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_descendant, Selector, false)
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_descendant, HtmlInspector\\Selector, false)
 ZEND_END_ARG_INFO()
 
 ZEND_METHOD(Selector, preceding_sibling)
@@ -329,7 +331,7 @@ ZEND_METHOD(Selector, preceding_sibling)
     Selector_preceding_sibling(SELECTOR(ZEND_THIS));
     ZVAL_OBJ_COPY(return_value, Z_OBJ_P(ZEND_THIS));
 }
-ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_preceding_sibling, Selector, false)
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_preceding_sibling, HtmlInspector\\Selector, false)
 ZEND_END_ARG_INFO()
 
 ZEND_METHOD(Selector, following_sibling)
@@ -338,7 +340,7 @@ ZEND_METHOD(Selector, following_sibling)
     Selector_following_sibling(SELECTOR(ZEND_THIS));
     ZVAL_OBJ_COPY(return_value, Z_OBJ_P(ZEND_THIS));
 }
-ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_following_sibling, Selector, false)
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_following_sibling, HtmlInspector\\Selector, false)
 ZEND_END_ARG_INFO()
 
 ZEND_METHOD(Selector, attribute_exists)
@@ -350,7 +352,7 @@ ZEND_METHOD(Selector, attribute_exists)
     Selector_attribute_exists(SELECTOR(ZEND_THIS), name->val);
     ZVAL_OBJ_COPY(return_value, Z_OBJ_P(ZEND_THIS));
 }
-ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_attribute_exists, Selector, false)
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_attribute_exists, HtmlInspector\\Selector, false)
     ZEND_ARG_TYPE_INFO(0, name, IS_STRING, false)
 ZEND_END_ARG_INFO()
 
@@ -365,7 +367,7 @@ ZEND_METHOD(Selector, attribute_equals)
     Selector_attribute_equals(SELECTOR(ZEND_THIS), name->val, value->val);
     ZVAL_OBJ_COPY(return_value, Z_OBJ_P(ZEND_THIS));
 }
-ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_attribute_equals, Selector, false)
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_attribute_equals, HtmlInspector\\Selector, false)
     ZEND_ARG_TYPE_INFO(0, name, IS_STRING, false)
     ZEND_ARG_TYPE_INFO(0, value, IS_STRING, false)
 ZEND_END_ARG_INFO()
@@ -381,7 +383,7 @@ ZEND_METHOD(Selector, attribute_contains)
     Selector_attribute_contains(SELECTOR(ZEND_THIS), name->val, value->val);
     ZVAL_OBJ_COPY(return_value, Z_OBJ_P(ZEND_THIS));
 }
-ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_attribute_contains, Selector, false)
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_attribute_contains, HtmlInspector\\Selector, false)
     ZEND_ARG_TYPE_INFO(0, name, IS_STRING, false)
     ZEND_ARG_TYPE_INFO(0, value, IS_STRING, false)
 ZEND_END_ARG_INFO()
@@ -397,7 +399,7 @@ ZEND_METHOD(Selector, attribute_starts_with)
     Selector_attribute_starts_with(SELECTOR(ZEND_THIS), name->val, value->val);
     ZVAL_OBJ_COPY(return_value, Z_OBJ_P(ZEND_THIS));
 }
-ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_attribute_starts_with, Selector, false)
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_attribute_starts_with, HtmlInspector\\Selector, false)
     ZEND_ARG_TYPE_INFO(0, name, IS_STRING, false)
     ZEND_ARG_TYPE_INFO(0, value, IS_STRING, false)
 ZEND_END_ARG_INFO()
@@ -408,7 +410,7 @@ ZEND_METHOD(Selector, or)
     Selector_or(SELECTOR(ZEND_THIS));
     ZVAL_OBJ_COPY(return_value, Z_OBJ_P(ZEND_THIS));
 }
-ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_or, Selector, false)
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_or, HtmlInspector\\Selector, false)
 ZEND_END_ARG_INFO()
 
 ZEND_METHOD(Selector, and)
@@ -417,7 +419,7 @@ ZEND_METHOD(Selector, and)
     Selector_and(SELECTOR(ZEND_THIS));
     ZVAL_OBJ_COPY(return_value, Z_OBJ_P(ZEND_THIS));
 }
-ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_and, Selector, false)
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_and, HtmlInspector\\Selector, false)
 ZEND_END_ARG_INFO()
 
 ZEND_METHOD(Selector, not)
@@ -426,7 +428,7 @@ ZEND_METHOD(Selector, not)
     Selector_not(SELECTOR(ZEND_THIS));
     ZVAL_OBJ_COPY(return_value, Z_OBJ_P(ZEND_THIS));
 }
-ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_not, Selector, false)
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_not, HtmlInspector\\Selector, false)
 ZEND_END_ARG_INFO()
 
 ZEND_METHOD(Selector, case_i)
@@ -435,7 +437,7 @@ ZEND_METHOD(Selector, case_i)
     Selector_case_i(SELECTOR(ZEND_THIS));
     ZVAL_OBJ_COPY(return_value, Z_OBJ_P(ZEND_THIS));
 }
-ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_case_i, Selector, false)
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_case_i, HtmlInspector\\Selector, false)
 ZEND_END_ARG_INFO()
 
 static zend_function_entry functions[] = {

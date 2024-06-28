@@ -23,7 +23,7 @@ along axes of the node tree, and filters. Boolean operations (and, or, not) on f
 implemented using postfix notation. “and” operations are appended implicitly to chained filters.
 
 Nodes are represented by integers. Node `0` is the always present `#document` node. A node value
-of `-1` is returned by `iterate()` is the iterator is exhausted. Passing `-1` or other non-existent
+of `-1` is returned by `iterate()` if the iterator is exhausted. Passing `-1` or other non-existent
 node references to the `get_*` methods returns null.
 
 ### C
@@ -43,10 +43,9 @@ Example code:
 function extract_anchors(string $html_utf8, string $document_uri)
 {
     $doc = new HtmlInspector\HtmlDocument($html_utf8);
-    $node_base = $doc->select(0)->child()->name('html')->child()->name('head')->child()
+    $base_node = $doc->select(0)->child()->name('html')->child()->name('head')->child()
         ->name('base')->iterate();
-    $base = $doc->get_attribute($node_base, 'href');
-    $base = HtmlInspector\resolve_iri($base, $document_uri);
+    $base = HtmlInspector\resolve_iri($doc->get_attribute($base_node, 'href'), $document_uri);
     $selector = $doc->select(0)->descendant()->name('a')->attribute_starts_with('#')->not();
     while (($node_a = $selector->iterate()) !== -1) {
         $href = $doc->get_attribute($node_a, 'href');

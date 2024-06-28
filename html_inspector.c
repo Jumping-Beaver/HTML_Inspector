@@ -363,15 +363,11 @@ struct String {
 };
 
 #define STRING(cstring) (struct String) {cstring, sizeof cstring - 1, 0}
-#define NULL_STRING ((struct String) {.data = NULL, .length = 0, .is_malloced = false});
+#define NULL_STRING (struct String) {NULL, 0, false}
 
 void HtmlDocument_normalize_space(struct String *input)
 {
-    struct String result = (struct String) {
-        .data = malloc(input->length),
-        .length = 0,
-        .is_malloced = true
-    };
+    struct String result = (struct String) {malloc(input->length), 0, true};
     if (result.data == NULL) {
         if (input->is_malloced) {
             free(input->data);
@@ -409,11 +405,7 @@ void HtmlDocument_normalize_space(struct String *input)
 
 void HtmlDocument_entities_to_utf8(struct String *input, bool skip_stray_tags)
 {
-    struct String result = (struct String) {
-        .data = malloc(input->length),
-        .length = 0,
-        .is_malloced = true
-    };
+    struct String result = (struct String) {malloc(input->length), 0, true};
     if (result.data == NULL) {
         if (input->is_malloced) {
             free(input->data);
@@ -513,14 +505,17 @@ void HtmlDocument_entities_to_utf8(struct String *input, bool skip_stray_tags)
             continue;
         }
         unsigned char entity[40] = {'&'};
-        for (k = 1; input->data[i + k] != ';' && k < sizeof entity - 2 && i + k < input->length; ++k) {
+        k = 1;
+        do {
+            if (k == sizeof entity - 1 || i + k == input->length) {
+                break;
+            }
             entity[k] = input->data[i + k];
-        }
-        if (i + k == input->length && input->data[i + k] != ';') {
+        } while (entity[k++] != ';');
+        if (entity[k - 1] != ';') {
             result.data[result.length++] = '&';
             continue;
         }
-        entity[k++] = ';';
         entity[k] = '\0';
         const char *pos = strstr(ENTITIES[entity[1]], entity);
         if (pos == NULL) {
@@ -528,7 +523,7 @@ void HtmlDocument_entities_to_utf8(struct String *input, bool skip_stray_tags)
             continue;
         }
         i += k - 1;
-        if (pos[k] == '&') {  // Special case for the &amp; entity
+        if (pos[k] == '&') { // Special case for the &amp; entity
             result.data[result.length++] = '&';
         }
         while (pos[k] != '&' && pos[k] != '\0') {
@@ -661,8 +656,8 @@ struct Selector {
             } filter_data;
         };
         enum SelectorItemType type;
-    } selector_items[128];
-    unsigned char selector_item_count;
+    } items[128];
+    unsigned char item_count;
 };
 
 /*****************************************************************************/
@@ -776,11 +771,7 @@ struct String HtmlDocument_extract_charset(const unsigned char *html)
         struct String content = NULL_STRING;
         while (parse_attribute(&attribute, &html)) {
             if (!strnicmp(attribute.name_start, "charset", attribute.name_length)) {
-                struct String result = {
-                    .data = (char *) attribute.value_start,
-                    .length = attribute.value_length,
-                    .is_malloced = false
-                };
+                struct String result = {(char *) attribute.value_start, attribute.value_length, false};
                 HtmlDocument_entities_to_utf8(&result, false);
                 return result;
             }
@@ -789,15 +780,12 @@ struct String HtmlDocument_extract_charset(const unsigned char *html)
                 content.length = attribute.value_length;
             }
             else if (!strnicmp(attribute.name_start, "http-equiv", attribute.name_length)) {
-                struct String attrval = {
-                    .data = (char *) attribute.value_start,
-                    .length = attribute.value_length,
-                    .is_malloced = false
-                };
+                struct String attrval = {(char *) attribute.value_start, attribute.value_length, false};
                 HtmlDocument_entities_to_utf8(&attrval, false);
                 if (!strnicmp(attrval.data, "content-type", attrval.length)) {
                     has_http_equiv_content_type = true;
                 }
+                string_free(attrval);
             }
         }
         if (has_http_equiv_content_type && content.data != NULL) {
@@ -1457,22 +1445,22 @@ static bool str_contains(const char *haystack, size_t haystack_length, const cha
 static void Selector_push_selector(struct Selector *sel, enum SelectorItemType type,
     const void *filter_arg1, const void *filter_arg2)
 {
-    if (sel->selector_item_count == 0 && type >= FILTER_OR) {
+    if (sel->item_count == 0 && type >= FILTER_OR) {
         return;
     }
-    if (sel->selector_item_count == sizeof sel->selector_items / sizeof *sel->selector_items) {
+    if (sel->item_count == sizeof sel->items / sizeof *sel->items) {
         return;
     }
-    sel->selector_items[sel->selector_item_count].type = type;
+    sel->items[sel->item_count].type = type;
     if (type < FILTER_OR) {
-        sel->selector_items[sel->selector_item_count].position = POSITION_NOT_STARTED;
-        sel->selector_items[sel->selector_item_count].axis_n = 0;
+        sel->items[sel->item_count].position = POSITION_NOT_STARTED;
+        sel->items[sel->item_count].axis_n = 0;
     }
     else {
-        sel->selector_items[sel->selector_item_count].filter_data.arg1 = filter_arg1;
-        sel->selector_items[sel->selector_item_count].filter_data.arg2 = filter_arg2;
+        sel->items[sel->item_count].filter_data.arg1 = filter_arg1;
+        sel->items[sel->item_count].filter_data.arg2 = filter_arg2;
     }
-    sel->selector_item_count += 1;
+    sel->item_count += 1;
 }
 
 void Selector_iterate_axis(struct Selector *sel, struct SelectorItem *si, const struct Node *ref)
@@ -1534,7 +1522,7 @@ static bool Selector_filter(struct Selector *sel, struct SelectorItem *si, struc
     if (si->type == FILTER_NTH) {
         struct SelectorItem *axis_selector = si;
         while (true) {
-            if (--axis_selector < sel->selector_items) {
+            if (--axis_selector < sel->items) {
                 return false;
             }
             if (axis_selector->type < FILTER_OR) {
@@ -1596,6 +1584,7 @@ static bool Selector_filter(struct Selector *sel, struct SelectorItem *si, struc
         else if (si->type == FILTER_ATTRIBUTE_STARTS_WITH_I) {
             matches = !strnicmp(si->filter_data.arg2, attr_string.data, strlen(si->filter_data.arg2));
         }
+        string_free(attr_string);
 
         if (matches) {
             return true;
@@ -1608,65 +1597,65 @@ int Selector_iterate(struct Selector *sel)
 {
     // The logic here relies on the refusal to push filters to selector item position 0
 
-    if (sel->selector_item_count == 0 || sel->selector_items[0].position == POSITION_EXHAUSTED) {
+    if (sel->item_count == 0 || sel->items[0].position == POSITION_EXHAUSTED) {
         return -1;
     }
     while (true) {
         int preceding_axis = sel->active_axis;
         while (--preceding_axis >= 0) {
-            if (sel->selector_items[preceding_axis].type < FILTER_OR) {
+            if (sel->items[preceding_axis].type < FILTER_OR) {
                 break;
             }
         }
         const struct Node *ref = preceding_axis == -1 ? sel->reference_node :
-            &sel->doc->nodes[sel->selector_items[preceding_axis].position];
+            &sel->doc->nodes[sel->items[preceding_axis].position];
 
-        Selector_iterate_axis(sel, &sel->selector_items[sel->active_axis], ref);
-        if (sel->selector_items[sel->active_axis].position == POSITION_EXHAUSTED) {
+        Selector_iterate_axis(sel, &sel->items[sel->active_axis], ref);
+        if (sel->items[sel->active_axis].position == POSITION_EXHAUSTED) {
             if (sel->active_axis == 0) {
                 return -1;
             }
             do {
                 sel->active_axis -= 1;
-            } while (sel->active_axis > 0 && sel->selector_items[sel->active_axis].type >= FILTER_OR);
+            } while (sel->active_axis > 0 && sel->items[sel->active_axis].type >= FILTER_OR);
             continue;
         }
 
-        sel->selector_items[sel->active_axis].axis_n += 1;
+        sel->items[sel->active_axis].axis_n += 1;
 
         unsigned int bool_stack_capacity = 0;
         int filter_index = sel->active_axis;
-        while (++filter_index < sel->selector_item_count &&
-               sel->selector_items[filter_index].type >= FILTER_OR)
+        while (++filter_index < sel->item_count &&
+               sel->items[filter_index].type >= FILTER_OR)
         {
             bool_stack_capacity += 1;
         }
         bool bool_stack[bool_stack_capacity];
         filter_index = sel->active_axis;
         signed int bool_stack_size = 0;
-        while (++filter_index < sel->selector_item_count &&
-               sel->selector_items[filter_index].type >= FILTER_OR)
+        while (++filter_index < sel->item_count &&
+               sel->items[filter_index].type >= FILTER_OR)
         {
-            if (sel->selector_items[filter_index].type == FILTER_NOT) {
+            if (sel->items[filter_index].type == FILTER_NOT) {
                 if (bool_stack_size >= 1) {
                     bool_stack[bool_stack_size - 1] = !bool_stack[bool_stack_size - 1];
                 }
             }
-            else if (sel->selector_items[filter_index].type == FILTER_AND) {
+            else if (sel->items[filter_index].type == FILTER_AND) {
                 if (bool_stack_size >= 2) {
                     bool_stack_size -= 1;
                     bool_stack[bool_stack_size - 1] &= bool_stack[bool_stack_size];
                 }
             }
-            else if (sel->selector_items[filter_index].type == FILTER_OR) {
+            else if (sel->items[filter_index].type == FILTER_OR) {
                 if (bool_stack_size >= 2) {
                     bool_stack_size -= 1;
                     bool_stack[bool_stack_size - 1] |= bool_stack[bool_stack_size];
                 }
             }
             else {
-                struct Node *node = &sel->doc->nodes[sel->selector_items[sel->active_axis].position];
-                bool_stack[bool_stack_size++] = Selector_filter(sel, &sel->selector_items[filter_index], node);
+                struct Node *node = &sel->doc->nodes[sel->items[sel->active_axis].position];
+                bool_stack[bool_stack_size++] = Selector_filter(sel, &sel->items[filter_index], node);
             }
         }
         bool filter_state = true;
@@ -1680,13 +1669,13 @@ int Selector_iterate(struct Selector *sel)
             continue;
         }
 
-        if (filter_index == sel->selector_item_count) {
-            return sel->selector_items[sel->active_axis].position;
+        if (filter_index == sel->item_count) {
+            return sel->items[sel->active_axis].position;
         }
 
         sel->active_axis = filter_index;
-        sel->selector_items[sel->active_axis].position = POSITION_NOT_STARTED;
-        sel->selector_items[sel->active_axis].axis_n = 0;
+        sel->items[sel->active_axis].position = POSITION_NOT_STARTED;
+        sel->items[sel->active_axis].axis_n = 0;
     }
 }
 
@@ -1762,10 +1751,10 @@ void Selector_not(struct Selector *sel)
 
 void Selector_case_i(struct Selector *sel)
 {
-    if (sel->selector_item_count == 0) {
+    if (sel->item_count == 0) {
         return;
     }
-    struct SelectorItem *si = &sel->selector_items[sel->selector_item_count - 1];
+    struct SelectorItem *si = &sel->items[sel->item_count - 1];
     if (si->type == FILTER_ATTRIBUTE_EQUALS) {
         si->type = FILTER_ATTRIBUTE_EQUALS_I;
     }
@@ -1782,9 +1771,9 @@ void Selector_case_i(struct Selector *sel)
 
 void Selector_rewind(struct Selector *sel)
 {
-    if (sel->selector_item_count > 0) {
+    if (sel->item_count > 0) {
         // This is safe because we refuse to push filters to position 0
-        sel->selector_items[0].position = POSITION_NOT_STARTED;
+        sel->items[0].position = POSITION_NOT_STARTED;
     }
     sel->active_axis = 0;
 }
@@ -1792,7 +1781,7 @@ void Selector_rewind(struct Selector *sel)
 void HtmlDocument_reset(struct Selector *sel)
 {
     sel->active_axis = 0;
-    sel->selector_item_count = 0;
+    sel->item_count = 0;
 }
 
 struct String HtmlDocument_get_name(struct HtmlDocument *doc, int node)
@@ -1848,11 +1837,7 @@ struct String HtmlDocument_get_attribute(struct HtmlDocument *doc, int node, con
         if (attributes[i].name_length == strlen_attribute &&
             !strnicmp(attributes[i].name_start, attribute, attributes[i].name_length))
         {
-            struct String result = {
-                .data = (char *) attributes[i].value_start,
-                .length = attributes[i].value_length,
-                .is_malloced = false
-            };
+            struct String result = {(char *) attributes[i].value_start,attributes[i].value_length, false};
             HtmlDocument_entities_to_utf8(&result, false);
             return result;
         }
@@ -1945,7 +1930,7 @@ static struct String HtmlDocument_get_html(struct HtmlDocument *doc, int node, b
         return NULL_STRING;
     }
     size_t result_capacity = 1024;
-    struct String result = {malloc(result_capacity), 0, false};
+    struct String result = {malloc(result_capacity), 0, true};
     #define APPEND(_data, _length) \
         if (result.length + _length >= result_capacity) { \
             result_capacity += result.length + 1024; \
@@ -1980,6 +1965,7 @@ static struct String HtmlDocument_get_html(struct HtmlDocument *doc, int node, b
                 HtmlDocument_escape(&value, false);
             }
             APPEND(value.data, value.length)
+            string_free(value);
         }
         else {
             APPEND("<", 1);
@@ -1993,9 +1979,6 @@ static struct String HtmlDocument_get_html(struct HtmlDocument *doc, int node, b
 
             struct Attribute *attribute = &doc->attributes[n->attributes_start];
             while (attribute < &doc->attributes[n->attributes_start + n->attributes_count]) {
-                struct String value = {(char *) attribute->value_start, attribute->value_length, false};
-                HtmlDocument_entities_to_utf8(&value, false); // TODO check malloc failure
-                HtmlDocument_escape(&value, true);
                 APPEND(" ", 1);
                 APPEND(attribute->name_start, attribute->name_length);
 
@@ -2007,9 +1990,16 @@ static struct String HtmlDocument_get_html(struct HtmlDocument *doc, int node, b
                 }
 
                 APPEND("=\"", 2)
+
+                struct String value = {(char *) attribute->value_start, attribute->value_length, false};
+                HtmlDocument_entities_to_utf8(&value, false); // TODO check malloc failure
+                HtmlDocument_escape(&value, true);
                 APPEND(value.data, value.length)
+                string_free(value);
+
                 APPEND("\"", 1)
                 attribute += 1;
+
             }
             APPEND(">", 1)
         }
@@ -2060,9 +2050,9 @@ struct Selector * HtmlDocument_select(struct HtmlDocument *doc, unsigned int ind
         return NULL;
     }
     s->doc = doc;
+    s->item_count = 0;
     s->active_axis = 0;
     s->reference_node = index < doc->node_count ? doc->nodes + index : doc->nodes;
-    s->selector_item_count = 0;
     return s;
 }
 

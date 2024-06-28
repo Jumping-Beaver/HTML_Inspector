@@ -11,6 +11,7 @@ function benchmark_HtmlInspector()
         $doc = new HtmlInspector\HtmlDocument($html);
         $selector = $doc->select(0)->descendant()->name('a');
         while (($node = $selector->iterate()) != -1) {
+            $doc->get_outer_html($node);
             $href = $doc->get_attribute($node, 'href');
             $num += strlen($href);
         }

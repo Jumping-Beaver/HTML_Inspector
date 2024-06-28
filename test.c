@@ -112,6 +112,7 @@ static void test_resolve_iri()
         struct String relative;
         struct String target;
     } test_cases[] = {
+        {NULL_STRING, STRING("http://a/b"), STRING("http://a/b")},
         {STRING(""), STRING("http://a/→"), STRING("http://a/%E2%86%92")},
         {STRING("http://a?f"), STRING("p"), STRING("http://a/p")},
         {STRING("http://a/?b?c#b#c"), STRING("?e?f#e#f"), STRING("http://a/?e?f#e#f")},
@@ -250,9 +251,9 @@ static void test_outer_html()
 int main()
 {
     //test_outer_html();
-    benchmark();
+    //benchmark();
     //test_extract_charset();
-    //test_resolve_iri();
+    test_resolve_iri();
     //test_entities_to_utf8();
     //test_normalize_space();
     return 0;
