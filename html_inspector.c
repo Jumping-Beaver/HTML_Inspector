@@ -2071,7 +2071,8 @@ static int from_hex(char c)
 struct String resolve_iri(struct String reference, struct String base)
 {
     // Resolve UTF-8 encoded IRI references and convert to ASCII-encoded URI format.
-    // Resolving a IRI always produces a URI.
+    // The standard defines IRI resolving as the mapping to a URI followed by resolving the URI.
+    //
     // Both input parameters are expected to have UTF-8 encoding.
     //
     // IRI: https://datatracker.ietf.org/doc/html/rfc3987
@@ -2082,8 +2083,6 @@ struct String resolve_iri(struct String reference, struct String base)
     //
     // TODO: We will convert IDNA to ASCII because some network clients may not support IDN, notably
     // PHP's `file_get_contents`. In cURL, IDN support is controlled via a build option.
-
-    // TODO: Support NULL input for reference?, exchange base & reference??
 
     int i;
     enum {
@@ -2140,6 +2139,8 @@ struct String resolve_iri(struct String reference, struct String base)
     struct String source = reference_start_component == COMPONENT_SCHEME ? reference : base;
     i = 0;
 
+    // Copy the scheme from `source` to the result
+
     int scheme_length = 0;
     while (i < source.length && source.data[i] != ':') {
         APPEND(tolower(source.data[i]));
@@ -2150,6 +2151,9 @@ struct String resolve_iri(struct String reference, struct String base)
         APPEND(':');
         i += 1;
     }
+
+    // Copy the authority from `source` to the result
+
     if (reference_start_component == COMPONENT_AUTHORITY) {
         source = reference;
         i = 0;
@@ -2208,6 +2212,10 @@ struct String resolve_iri(struct String reference, struct String base)
             i += 1;
         }
     }
+
+    // Copy the path from `source` to the result. When copying from `base`, `cut_off` specifies the
+    // index at which to switch to `reference` as the source.
+
     if (reference_start_component == COMPONENT_ABSOLUTE_PATH) {
         source = reference;
         i = 1;
@@ -2230,7 +2238,7 @@ struct String resolve_iri(struct String reference, struct String base)
     int normalized_path_start = normalized.length - 1;
     while (true) {
         if (i >= source.length) {
-            if (source.data == base.data) {
+            if (source.data != reference.data || source.length != reference.length) {
                 source = reference;
                 i = 0;
                 continue;

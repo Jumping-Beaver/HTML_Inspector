@@ -112,6 +112,7 @@ static void test_resolve_iri()
         struct String relative;
         struct String target;
     } test_cases[] = {
+        {base, base, base}, // Asserting that there is no endless loop if `reference == base`
         {NULL_STRING, STRING("http://a/b"), STRING("http://a/b")},
         {STRING(""), STRING("http://a/→"), STRING("http://a/%E2%86%92")},
         {STRING("http://a?f"), STRING("p"), STRING("http://a/p")},
@@ -126,7 +127,7 @@ static void test_resolve_iri()
 
         //{STRING(""), STRING("hTTp://uSEr:pASSWOrd@aAJDOIJsde/ooob/1c2/u/u/..?abcdef#1234"), STRING("http://a/")},
 
-        // Subseqent test cases are from here: https://www.rfc-editor.org/rfc/rfc3986#section-5.4.1
+        // Subsequent test cases are from here: https://www.rfc-editor.org/rfc/rfc3986#section-5.4.1
 
         {base, STRING("g:h"), STRING("g:h")},
         {base, STRING("g"), STRING("http://a/b/c/g")},
@@ -169,7 +170,6 @@ static void test_resolve_iri()
         {base, STRING("g?y/../x"), STRING("http://a/b/c/g?y/../x")},
         {base, STRING("g#s/./x"), STRING("http://a/b/c/g#s/./x")},
         {base, STRING("g#s/../x"), STRING("http://a/b/c/g#s/../x")},
-
     };
     for (int i = 0; i < sizeof test_cases / sizeof *test_cases; ++i) {
         struct String target = resolve_iri(test_cases[i].relative, test_cases[i].base);
