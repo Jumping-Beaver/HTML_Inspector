@@ -1864,8 +1864,9 @@ static int HtmlDocument_escape(struct String *html, bool attribute_mode)
         else if (attribute_mode && html->data[i] == '"') {
             result_length += sizeof "&quot;" - 2;
         }
-        else if (html->data[i] == 0xA0) {
-            result_length += sizeof "&nbsp;" - 2;
+        else if (html->data[i] == 0xC2 && i + 1 < html->length && html->data[i + 1] == 0xA0) {
+            result_length += sizeof "&nbsp;" - 3;
+            i += 1;
         }
     }
     if (result_length == html->length) {
@@ -1903,13 +1904,14 @@ static int HtmlDocument_escape(struct String *html, bool attribute_mode)
             result.data[result.length++] = 't';
             result.data[result.length++] = ';';
         }
-        else if (html->data[i] == 0xA0) {
+        else if (html->data[i] == 0xC2 && i + 1 < html->length && html->data[i + 1] == 0xA0) {
             result.data[result.length++] = '&';
             result.data[result.length++] = 'n';
             result.data[result.length++] = 'b';
             result.data[result.length++] = 's';
             result.data[result.length++] = 'p';
             result.data[result.length++] = ';';
+            i += 1;
         }
         else {
             result.data[result.length++] = html->data[i];
