@@ -504,6 +504,10 @@ void HtmlDocument_entities_to_utf8(struct String *input, bool skip_stray_tags)
             }
             continue;
         }
+        if (i + 1 == input->length || ENTITIES[input->data[i + 1]] == NULL) {
+            result.data[result.length++] = '&';
+            continue;
+        }
         unsigned char entity[40] = {'&'};
         k = 1;
         do {
@@ -1931,11 +1935,11 @@ static struct String HtmlDocument_get_html(struct HtmlDocument *doc, int node, b
     if (node < 0 || node >= doc->node_count) {
         return NULL_STRING;
     }
-    size_t result_capacity = 1024;
+    size_t result_capacity = 1;
     struct String result = {malloc(result_capacity), 0, true};
     #define APPEND(_data, _length) \
         if (result.length + _length >= result_capacity) { \
-            result_capacity += result.length + 1024; \
+            result_capacity += _length + 1024; \
             char *r = realloc(result.data, result_capacity); \
             if (r == NULL) { \
                 free(result.data); \
