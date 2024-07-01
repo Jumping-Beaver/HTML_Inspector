@@ -199,14 +199,6 @@ static void test_entities_to_utf8()
     string_free(string);
 }
 
-static void test_normalize_space()
-{
-    struct String string = STRING("    asldkfas\n\nl  \r  dk→ø↓ſ€¶fjöasldfjö a         ");
-    HtmlDocument_normalize_space(&string);
-    printf("%.*s", string.length, string.data);
-    string_free(string);
-}
-
 static void test_outer_html()
 {
     // TODO: Insert empty head or not?
@@ -255,6 +247,5 @@ int main()
     //test_extract_charset();
     test_resolve_iri();
     //test_entities_to_utf8();
-    //test_normalize_space();
     return 0;
 }

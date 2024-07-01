@@ -365,44 +365,6 @@ struct String {
 #define STRING(cstring) (struct String) {cstring, sizeof cstring - 1, 0}
 #define NULL_STRING (struct String) {NULL, 0, false}
 
-void HtmlDocument_normalize_space(struct String *input)
-{
-    struct String result = (struct String) {malloc(input->length), 0, true};
-    if (result.data == NULL) {
-        if (input->is_malloced) {
-            free(input->data);
-        }
-        *input = NULL_STRING;
-        return;
-    }
-    for (int i = 0; i < input->length - 1; ++i) {
-        if (!CHARMASK_WHITESPACE[input->data[i]] ||
-            result.length > 0 && i < input->length - 2 && !CHARMASK_WHITESPACE[input->data[i + 1]])
-        {
-            if (CHARMASK_WHITESPACE[input->data[i]]) {
-                result.data[result.length] = ' ';
-            }
-            else {
-                result.data[result.length] = input->data[i];
-            }
-            result.length += 1;
-        }
-    }
-    if (input->is_malloced) {
-        free(input->data);
-    }
-    if (input->length != result.length) {
-        char *realloced = realloc(result.data, result.length);
-        if (realloced == NULL) {
-            free(result.data);
-            *input = NULL_STRING;
-            return;
-        }
-        result.data = realloced;
-    }
-    *input = result;
-}
-
 void HtmlDocument_entities_to_utf8(struct String *input, bool skip_stray_tags)
 {
     struct String result = (struct String) {malloc(input->length), 0, true};
