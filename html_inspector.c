@@ -1536,15 +1536,22 @@ static bool Selector_filter(struct Selector *sel, struct SelectorItem *si, struc
         return axis_selector->axis_n == (long) si->filter_data.arg1;
     }
     else if (si->type == FILTER_NODE_NAME) {
+        const char *name = (const char *) si->filter_data.arg1;
+        const char *name_start;
+        size_t name_length;
         if (node->type == NODE_TYPE_COMMENT) {
-            return !CHARSEQICMP(node->name_start, node->name_length, "#comment");
+            name_start = "#comment";
+            name_length = sizeof "#comment" - 1;
         }
         else if (node->type == NODE_TYPE_TEXT || node->type == NODE_TYPE_CDATA) {
-            return !CHARSEQICMP(node->name_start, node->name_length, "#text");
+            name_start = "#text";
+            name_length = sizeof "#text" - 1;
         }
-        const char *name = (const char *) si->filter_data.arg1;
-        return node->name_length == strlen(name) &&
-            !strnicmp(node->name_start, name, node->name_length);
+        else {
+            name_start = node->name_start;
+            name_length = node->name_length;
+        }
+        return name_length == strlen(name) && !strnicmp(name_start, name, name_length);
     }
 
     size_t name_length = strlen(si->filter_data.arg1);
