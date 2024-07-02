@@ -71,11 +71,11 @@ Objectives:
 
 - Minimise redundancy or syntactic sugar in the API
 
-  Example: A parent selector is not required because we can use `ancestor->nth(1)`
+  Example: A parent selector is not required because we can use `ancestor()->nth(1)`
 
 Out of scope:
 
-- Support for a pure XML parser (besides XHTML)
+- Implementation of a pure XML parser (besides XHTML)
 
   There are more good-quality XML parsers than HTML parsers.
 
@@ -133,7 +133,7 @@ implements iterators is awkward. Firstly, two redundant implementations are need
 looping with `foreach` and to implement the `Iterator` interface. Moreover, it needs the two
 methods `next` (with no return value) and `current` instead of just one, we have to implement a
 caching of both the current value and of the validity state of the iterator, and in `current` we
-conditionally have have to make one implicit iteration. Python is an example where iteration is
+conditionally have to make one implicit iteration. Python is an example where iteration is
 implemented more elegantly using a single `__next__` method that both iterates and then returns the
 current value. Another complication is how to encode the non-existence of a node. With PHP iterators,
 we need to use the value `false` and implement union type hints and a respective check for the `get_*`

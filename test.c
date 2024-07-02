@@ -183,22 +183,6 @@ static void test_resolve_iri()
     }
 }
 
-static void test_entities_to_utf8()
-{
-    char cstring[] =
-        "&auml;sdluifaiuocvbfgqoiwcuhfqnoifueoiuhnqoiefquhefo &quot; &alpha; "
-        "&beta; &gamma; &delta; [&#x3a9;]</stray>u&invalid;entity";
-    for (int i = 0; i < 100000; ++i) {
-        struct String string = STRING(cstring);
-        HtmlDocument_entities_to_utf8(&string, true);
-        string_free(string);
-    }
-    struct String string = STRING(cstring);
-    HtmlDocument_entities_to_utf8(&string, true);
-    printf("%.*s", string.length, string.data);
-    string_free(string);
-}
-
 static void test_outer_html()
 {
     // TODO: Insert empty head or not?
@@ -246,6 +230,5 @@ int main()
     //benchmark();
     //test_extract_charset();
     test_resolve_iri();
-    //test_entities_to_utf8();
     return 0;
 }

@@ -61,22 +61,6 @@ ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO(arginfo_resolve_iri, IS_STRING, true)
     ZEND_ARG_TYPE_INFO(0, base, IS_STRING, false)
 ZEND_END_ARG_INFO()
 
-ZEND_METHOD(HtmlDocument, entities_to_utf8)
-{
-    zend_string *html;
-    ZEND_PARSE_PARAMETERS_START(1, 1)
-        Z_PARAM_STR(html)
-    ZEND_PARSE_PARAMETERS_END();
-
-    struct String string = {html->val, html->len, false};
-    HtmlDocument_entities_to_utf8(&string, false);
-    ZVAL_STRINGL(return_value, string.data, string.length);
-    string_free(string);
-}
-ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO(arginfo_entities_to_utf8, IS_STRING, false)
-    ZEND_ARG_TYPE_INFO(0, html, IS_STRING, false)
-ZEND_END_ARG_INFO()
-
 ZEND_METHOD(HtmlDocument, extract_charset)
 {
     zend_string *html;
@@ -430,7 +414,6 @@ static zend_function_entry functions[] = {
 };
 
 static zend_function_entry functions_HtmlDocument[] = {
-    ZEND_ME(HtmlDocument, entities_to_utf8, arginfo_entities_to_utf8, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
     ZEND_ME(HtmlDocument, extract_charset, arginfo_extract_charset, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
     ZEND_ME(HtmlDocument, __construct, arginfo___construct, ZEND_ACC_PUBLIC)
     ZEND_ME(HtmlDocument, __destruct, arginfo___destruct, ZEND_ACC_PUBLIC)

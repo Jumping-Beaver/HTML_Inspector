@@ -365,7 +365,7 @@ struct String {
 #define STRING(cstring) (struct String) {cstring, sizeof cstring - 1, 0}
 #define NULL_STRING (struct String) {NULL, 0, false}
 
-void HtmlDocument_entities_to_utf8(struct String *input, bool skip_stray_tags)
+static void entities_to_utf8(struct String *input, bool skip_stray_tags)
 {
     struct String result = (struct String) {malloc(input->length), 0, true};
     if (result.data == NULL) {
@@ -738,7 +738,7 @@ struct String HtmlDocument_extract_charset(const unsigned char *html)
         while (parse_attribute(&attribute, &html)) {
             if (!strnicmp(attribute.name_start, "charset", attribute.name_length)) {
                 struct String result = {(char *) attribute.value_start, attribute.value_length, false};
-                HtmlDocument_entities_to_utf8(&result, false);
+                entities_to_utf8(&result, false);
                 return result;
             }
             if (!strnicmp(attribute.name_start, "content", attribute.name_length)) {
@@ -747,7 +747,7 @@ struct String HtmlDocument_extract_charset(const unsigned char *html)
             }
             else if (!strnicmp(attribute.name_start, "http-equiv", attribute.name_length)) {
                 struct String attrval = {(char *) attribute.value_start, attribute.value_length, false};
-                HtmlDocument_entities_to_utf8(&attrval, false);
+                entities_to_utf8(&attrval, false);
                 if (!strnicmp(attrval.data, "content-type", attrval.length)) {
                     has_http_equiv_content_type = true;
                 }
@@ -755,7 +755,7 @@ struct String HtmlDocument_extract_charset(const unsigned char *html)
             }
         }
         if (has_http_equiv_content_type && content.data != NULL) {
-            HtmlDocument_entities_to_utf8(&content, false);
+            entities_to_utf8(&content, false);
             int charset_begin = 0, charset_length = 0;
             for (; charset_begin < content.length; ++charset_begin) {
                 if (content.data[charset_begin] != ';') {
@@ -962,7 +962,7 @@ static struct HtmlDocument * HtmlDocument(const unsigned char *html)
 
                 // Not start tag found. We extend the current text node until the next `<`
                 // following the stray tag. Stray tags are filtered out by the
-                // `HtmlDocument_entities_to_utf8` function.
+                // `entities_to_utf8` function.
 
                 node = &doc->nodes[doc->node_count - 1];
                 if (node->type != NODE_TYPE_TEXT) {
@@ -1528,7 +1528,7 @@ static bool Selector_filter(struct Selector *sel, struct SelectorItem *si, struc
             return true;
         }
         struct String attr_string = {(char *) attr->value_start, attr->value_length, false};
-        HtmlDocument_entities_to_utf8(&attr_string, false);
+        entities_to_utf8(&attr_string, false);
 
         bool matches = false;
         if (si->type == FILTER_ATTRIBUTE_EQUALS) {
@@ -1792,7 +1792,7 @@ struct String HtmlDocument_get_value(struct HtmlDocument *doc, int node)
             false
         };
         if (doc->nodes[node].type != NODE_TYPE_CDATA) {
-            HtmlDocument_entities_to_utf8(&value, true);
+            entities_to_utf8(&value, true);
         }
         return value;
     }
@@ -1811,14 +1811,14 @@ struct String HtmlDocument_get_attribute(struct HtmlDocument *doc, int node, con
             !strnicmp(attributes[i].name_start, attribute, attributes[i].name_length))
         {
             struct String result = {(char *) attributes[i].value_start,attributes[i].value_length, false};
-            HtmlDocument_entities_to_utf8(&result, false);
+            entities_to_utf8(&result, false);
             return result;
         }
     }
     return NULL_STRING;
 }
 
-static int HtmlDocument_escape(struct String *html, bool attribute_mode)
+static int escape(struct String *html, bool attribute_mode)
 {
     // https://dev.w3.org/html5/spec-LC/the-end.html#html-fragment-serialization-algorithm
     // Section: “Escaping a string”
@@ -1936,8 +1936,8 @@ static struct String HtmlDocument_get_html(struct HtmlDocument *doc, int node, b
         else if (n->type == NODE_TYPE_TEXT || n->type == NODE_TYPE_CDATA) {
             struct String value = {(char *) n->value_start, n->value_length, false};
             if (n->type != NODE_TYPE_CDATA) {
-                HtmlDocument_entities_to_utf8(&value, true); // TODO check malloc failure
-                HtmlDocument_escape(&value, false);
+                entities_to_utf8(&value, true); // TODO check malloc failure
+                escape(&value, false);
             }
             APPEND(value.data, value.length)
             string_free(value);
@@ -1967,8 +1967,8 @@ static struct String HtmlDocument_get_html(struct HtmlDocument *doc, int node, b
                 APPEND("=\"", 2)
 
                 struct String value = {(char *) attribute->value_start, attribute->value_length, false};
-                HtmlDocument_entities_to_utf8(&value, false); // TODO check malloc failure
-                HtmlDocument_escape(&value, true);
+                entities_to_utf8(&value, false); // TODO check malloc failure
+                escape(&value, true);
                 APPEND(value.data, value.length)
                 string_free(value);
 
