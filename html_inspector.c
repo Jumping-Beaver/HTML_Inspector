@@ -1276,13 +1276,12 @@ static struct HtmlDocument * HtmlDocument(const unsigned char *html)
             !CHARSEQICMP(node->name_start, node->name_length, "textarea"))
         {
             type = NODE_TYPE_CDATA;
-            while (html[text_node_length] != '\0') {
+            while (
+                html[text_node_length] != '\0' &&
+                (html[text_node_length] != '<' || html[text_node_length + 1] != '/' ||
+                strnicmp(&html[text_node_length + 2], node->name_start, node->name_length))
+            ) {
                 text_node_length += 1;
-                if (html[text_node_length] == '<' && html[text_node_length + 1] == '/' &&
-                    !strnicmp(&html[text_node_length + 2], node->name_start, node->name_length))
-                {
-                    break;
-                }
             }
         }
 
@@ -1307,6 +1306,8 @@ static struct HtmlDocument * HtmlDocument(const unsigned char *html)
                 };
                 html_node = doc->node_count;
                 INCREMENT_NODE_COUNT();
+                unclosed_elements[unclosed_elements_size] = html_node;
+                INCREMENT_UNCLOSED_ELEMENTS_SIZE();
             }
             doc->nodes[doc->node_count] = (struct Node) {
                 .name_start = "body",

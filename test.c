@@ -89,7 +89,7 @@ static void benchmark()
     struct HtmlDocument *hi;
     hi = HtmlDocument(html);
     //HtmlDocument_print_stats(hi);
-    //HtmlDocument_dump(hi); return;
+    HtmlDocument_dump(hi); return;
     int node = 0;
     clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &start);
     for (i = 0; i < 200; ++i) {
@@ -190,6 +190,7 @@ static void test_outer_html()
         const char *input;
         const char *outer_html;
     } test_cases[] = {
+        {"a", "<html><body>a</body></html>"},
         {"<ul><li>1<li><ul><li>2</ul></ul>", "<html><head></head><body><ul><li>1</li><li><ul><li>2</li></ul></li></ul></body></html>"},
         {"<body a='<>&quot;'>&auml;&gt;&lt;&quot;&z", "<html><head></head><body a=\"<>&quot;\">ä&gt;&lt;\"&amp;z</body></html>"},
         {"<HTML LANG=en><META></HTML>", "<html lang=\"en\"><head><meta></head></html>"},
@@ -226,7 +227,7 @@ static void test_outer_html()
 
 int main()
 {
-    //test_outer_html();
+    test_outer_html();
     //benchmark();
     //test_extract_charset();
     test_resolve_iri();
