@@ -365,6 +365,224 @@ struct String {
 #define STRING(cstring) (struct String) {cstring, sizeof cstring - 1, 0}
 #define NULL_STRING (struct String) {NULL, 0, false}
 
+/*
+// See: https://www.w3.org/TR/2010/WD-html5-20101019/syntax.html#elements-0
+//
+// ESCAPE_RAWTEXT: Escape nothing. Use this for script & style (RAWTEXT content).
+//
+// ESCAPE_ATTRIBUTE: Escape the characters `"`, `&` and `\xC2\xA0` in attribute values.
+//
+// ESCAPE_RCDATA_OR_PLAINTEXT: Escape the characters `<`, `>`, `&`, `\xC2\xA0` in textarea & title
+// (RCDATA content) and in text nodes (PLAINTEXT content).
+//
+// RCDATA and PLAINTEXT are escaped in the same way. The difference is in the parsing behavior,
+// namely `<` may occur only in RCDATA.
+
+enum EscapeMode {
+    ESCAPE_RAWTEXT,
+    ESCAPE_ATTRIBUTE,
+    ESCAPE_RCDATA_OR_PLAINTEXT,
+};
+*/
+
+static size_t entities_to_utf8_(const char *input, size_t length, char *output, size_t capacity,
+    bool attribute_mode, bool skip_stray_tags)
+{
+    // Returns the number of bytes that have been consumed from `input`.
+    // `capacity` must be >= MAX(40, 6)!
+
+    const char *output_start = output;
+    size_t i, k;
+    for (i = 0; i < length && capacity - output + output_start >= 40; ++i) {
+        if (skip_stray_tags && input[i] == '<') { // Skipping stray tags
+            do {
+                i += 1;
+            } while (i < length && input[i] != '>');
+            continue;
+        }
+        if (!attribute_mode && input[i] == '<') {
+            output++ = '&';
+            output++ = 'l';
+            output++ = 't';
+            output++ = ';';
+            continue;
+        }
+        if (!attribute_mode && input[i] == '>') {
+            output++ = '&';
+            output++ = 'g';
+            output++ = 't';
+            output++ = ';';
+            continue;
+        }
+        if (input[i] == '&') {
+            output++ = '&';
+            output++ = 'a';
+            output++ = 'm';
+            output++ = 'p';
+            output++ = ';';
+            continue;
+        }
+        if (attribute_mode && input[i] == '"') {
+            output++ = '&';
+            output++ = 'q';
+            output++ = 'u';
+            output++ = 'o';
+            output++ = 't';
+            output++ = ';';
+            continue;
+        }
+        if (input[i] == 0xC2 && i + 1 < length && input[i + 1] == 0xA0) {
+            output++ = '&';
+            output++ = 'n';
+            output++ = 'b';
+            output++ = 's';
+            output++ = 'p';
+            output++ = ';';
+            i += 1;
+            continue;
+        }
+
+        if (input[i] != '&') {
+            *output++ = input[i];
+            continue;
+        }
+        if (input[i + 1] == '#') {
+            int codepoint = 0;
+            if (input[i + 2] == 'x') {
+                for (k = 3; input[i + k] != ';'; ++k) {
+                    if (input[i + k] >= '0' && input[i + k] <= '9') {
+                        codepoint = codepoint * 16 + (input[i + k] - '0');
+                    }
+                    else if (input[i + k] >= 'A' && input[i + k] <= 'F') {
+                        codepoint = codepoint * 16 + (10 + input[i + k] - 'A');
+                    }
+                    else if (input[i + k] >= 'a' && input[i + k] <= 'f') {
+                        codepoint = codepoint * 16 + (10 + input[i + k] - 'a');
+                    }
+                    else {
+                        codepoint = -1;
+                        break;
+                    }
+                }
+            }
+            else {
+                for (k = 2; input[i + k] != ';'; ++k) {
+                    if (input[i + k] >= '0' && input[i + k] <= '9') {
+                        codepoint = codepoint * 10 + (input[i + k] - '0');
+                    }
+                    else {
+                        codepoint = -1;
+                        break;
+                    }
+                }
+            }
+            if (codepoint < 0 || codepoint > 0x7FFFFFFF ||
+                escape_mode === ESCAPE_ATTRIBUTE && (
+                    codepoint == '"' || codepoint == '&' || codepoint == \xA0
+                ) ||
+                escape_mode === ESCAPE_RCDATA_OR_PLAINTEXT && (
+                    codepoint == '<' || codepoint == '>' || codepoint == '&' || codepoint == \xA0
+                )
+            ) {
+                *output++ = '&';
+                continue;
+            }
+            i += k;
+
+            // See `man utf-8`
+
+            if (codepoint <= 0x7F) {
+                *output++ = codepoint;
+            }
+            else if (codepoint <= 0x7FF) {
+                *output++ = 0b11000000 + (codepoint >> 6);
+                *output++ = (10 << 6) + (codepoint & 0b111111);
+            }
+            else if (codepoint <= 0xFFFF) {
+                *output++ = 0b11100000 + (codepoint >> 12);
+                *output++ = (10 << 6) + ((codepoint >> 6) & 0b111111);
+                *output++ = (10 << 6) + (codepoint & 0b111111);
+            }
+            else if (codepoint <= 0x1FFFFF) {
+                *output++ = 0b11110000 + (codepoint >> 18);
+                *output++ = (10 << 6) + ((codepoint >> 12) & 0b111111);
+                *output++ = (10 << 6) + ((codepoint >> 6) & 0b111111);
+                *output++ = (10 << 6) + (codepoint & 0b111111);
+            }
+            else if (codepoint <= 0x03FFFFFF) {
+                *output++ = 0b11111000 + (codepoint >> 24);
+                *output++ = (10 << 6) + ((codepoint >> 18) & 0b111111);
+                *output++ = (10 << 6) + ((codepoint >> 12) & 0b111111);
+                *output++ = (10 << 6) + ((codepoint >> 6) & 0b111111);
+                *output++ = (10 << 6) + (codepoint & 0b111111);
+            }
+            else if (codepoint <= 0x7FFFFFFF) {
+                *output++ = 0b1111110 + (codepoint >> 30);
+                *output++ = (10 << 6) + ((codepoint >> 24) & 0b111111);
+                *output++ = (10 << 6) + ((codepoint >> 18) & 0b111111);
+                *output++ = (10 << 6) + ((codepoint >> 12) & 0b111111);
+                *output++ = (10 << 6) + ((codepoint >> 6) & 0b111111);
+                *output++ = (10 << 6) + (codepoint & 0b111111);
+            }
+            continue;
+        }
+        if (i + 1 == length || ENTITIES[input[i + 1]] == NULL) {
+            *output++ = '&';
+            continue;
+        }
+        unsigned char entity[40] = {'&'};
+        k = 1;
+        do {
+            if (k == sizeof entity - 1 || i + k == length) {
+                break;
+            }
+            entity[k] = input[i + k];
+        } while (entity[k++] != ';');
+        if (entity[k - 1] != ';') {
+            *output++ = '&';
+            continue;
+        }
+        entity[k] = '\0';
+        const char *pos = strstr(ENTITIES[entity[1]], entity);
+        if (pos == NULL) {
+            *output++ = '&';
+            continue;
+        }
+        i += k - 1;
+        if (pos[k] == '&') { // Special case for the &amp; entity
+            *output++ = '&';
+        }
+        while (pos[k] != '&' && pos[k] != '\0') {
+            *output++ = pos[k++];
+        }
+    }
+    //return output - output_start;
+    return i - 1;
+}
+
+/*
+There are two ways to convert entitites to utf8 and escape special characters without doing
+mallocs inside these function.
+
+1.
+extend the result capacity by the value length, assuming that entities_to_utf8 will never lengthen the input
+entities_to_utf8 -> append to result
+get_escape_length of the appended piece
+extend the capacity of the result by get_escape_length - appended length
+escape (input, input_length, output, escape_length) -> rewrite the string BACKWARDS
+
+2.
+Integrate the escaping in entities_to_utf8. Problem: now the output can be longer than the input
+So we will return the number of consumed input bytes and call the function in a loop
+
+Performance consideration: Hard to estimate without testing.
+
+In (1) we write the whole string twice if there are escapable characters.
+
+In (2) we write only once but we have to check that the output length does not exceed the capacity
+in every loop iteration.
+*/
+
 static void entities_to_utf8(struct String *input, bool skip_stray_tags)
 {
     struct String result = (struct String) {malloc(input->length), 0, true};
@@ -420,10 +638,7 @@ static void entities_to_utf8(struct String *input, bool skip_stray_tags)
                     }
                 }
             }
-            if (codepoint > 0x7FFFFFFF) {
-                codepoint = -1;
-            }
-            if (codepoint == -1) {
+            if (codepoint < 0 || codepoint > 0x7FFFFFFF) {
                 result.data[result.length++] = '&';
                 continue;
             }
@@ -493,8 +708,7 @@ static void entities_to_utf8(struct String *input, bool skip_stray_tags)
             result.data[result.length++] = '&';
         }
         while (pos[k] != '&' && pos[k] != '\0') {
-            result.data[result.length++] = pos[k];
-            k += 1;
+            result.data[result.length++] = pos[k++];
         }
     }
     if (input->is_malloced) {
@@ -577,6 +791,7 @@ struct HtmlDocument {
         unsigned short value_length;
     } *attributes;
     unsigned int node_count;
+    size_t html_strlen;
 };
 
 static const int POSITION_NOT_STARTED = -1;
@@ -823,9 +1038,9 @@ static struct HtmlDocument * HtmlDocument(const unsigned char *html)
     // use heuristic starting values depending on the input length. `strlen` is very fast.
     // `*_capacity` must be greater than zero to avoid invalid memory write operations.
 
-    int html_strlen = strlen(html);
-    int nodes_capacity = 100 + html_strlen / 40;
-    int attributes_capacity = 100 + nodes_capacity * 2.4;
+    size_t html_strlen = strlen(html);
+    size_t nodes_capacity = 100 + html_strlen / 40;
+    size_t attributes_capacity = 100 + nodes_capacity * 2.4;
 
     struct HtmlDocument *doc = malloc(sizeof (struct HtmlDocument));
     if (doc == NULL) {
@@ -874,6 +1089,7 @@ static struct HtmlDocument * HtmlDocument(const unsigned char *html)
     };
     doc->node_count = 1;
     doc->html = html;
+    doc->html_strlen = html_strlen;
 
     int attributes_count = 0;
     int html_node = -1, head_node = -1, body_node = -1, tbody_node = -2, colgroup_node = -1;
@@ -1901,13 +2117,18 @@ static int escape(struct String *html, bool attribute_mode)
 static struct String HtmlDocument_get_html(struct HtmlDocument *doc, int node, bool inner)
 {
     // https://dev.w3.org/html5/spec-LC/the-end.html#html-fragment-serialization-algorithm
+    //
+    // “For HTML elements created by the HTML parser […], tagname will be lowercase.”
+    //
+    // “For attributes on HTML elements set by the HTML parser […], the local name will be
+    // lowercase.”
 
     if (node < 0 || node >= doc->node_count) {
         return NULL_STRING;
     }
-    size_t result_capacity = 1;
+    size_t result_capacity = doc->html_strlen;
     struct String result = {malloc(result_capacity), 0, true};
-    #define APPEND(_data, _length) \
+    #define EXTEND(_length) \
         if (result.length + _length >= result_capacity) { \
             result_capacity += _length + 1024; \
             char *r = realloc(result.data, result_capacity); \
@@ -1916,7 +2137,9 @@ static struct String HtmlDocument_get_html(struct HtmlDocument *doc, int node, b
                 return NULL_STRING; \
             } \
             result.data = r; \
-        } \
+        }
+    #define APPEND(_data, _length) \
+        EXTEND(_length) \
         memcpy(&result.data[result.length], _data, _length); \
         result.length += _length;
 
@@ -1930,11 +2153,27 @@ static struct String HtmlDocument_get_html(struct HtmlDocument *doc, int node, b
         ++n)
     {
         if (n->type == NODE_TYPE_COMMENT) {
-            APPEND("<!--", 4);
-            APPEND(n->value_start, n->value_length);
-            APPEND("-->", 3);
+            EXTEND(4 + n->value_length + 3);
+            result.data[result.length++] = '<';
+            result.data[result.length++] = '!';
+            result.data[result.length++] = '-';
+            result.data[result.length++] = '-';
+            memcpy(&result.data[result.length], n->value_start, n->value_length);
+            result.length += n->value_length;
+            result.data[result.length++] = '-';
+            result.data[result.length++] = '-';
+            result.data[result.length++] = '>';
         }
-        else if (n->type == NODE_TYPE_TEXT || n->type == NODE_TYPE_CDATA) {
+        else if (n->type == NODE_TYPE_TEXT) {
+            EXTEND(n->value_length);
+            //result.length += entities_to_utf8_(n->value_start, n->value_length,
+            //    &result.data[result.length], true);
+        }
+        else if (n->type == NODE_TYPE_CDATA) {
+            EXTEND(n->value_length);
+            memcpy(&result.data[result.length], n->value_start, n->value_length);
+        }
+        /*else if (n->type == NODE_TYPE_TEXT || n->type == NODE_TYPE_CDATA) {
             struct String value = {(char *) n->value_start, n->value_length, false};
             if (n->type != NODE_TYPE_CDATA) {
                 entities_to_utf8(&value, true); // TODO check malloc failure
@@ -1943,41 +2182,43 @@ static struct String HtmlDocument_get_html(struct HtmlDocument *doc, int node, b
             APPEND(value.data, value.length)
             string_free(value);
         }
+        */
         else {
-            APPEND("<", 1);
-            APPEND(n->name_start, n->name_length);
-
-            // Spec.: “For HTML elements created by the HTML parser […], tagname will be lowercase.”
-
-            for (int i = n->name_length + 1; i >= 1; --i) {
-                result.data[result.length - i] = tolower(result.data[result.length - i]);
+            EXTEND(1 + n->name_length + 1);
+            result.data[result.length++] = '<';
+            for (int i = 0; i < n->name_length; ++i) {
+                result.data[result.length++] = tolower(n->name_start[i]);
             }
 
             struct Attribute *attribute = &doc->attributes[n->attributes_start];
             while (attribute < &doc->attributes[n->attributes_start + n->attributes_count]) {
-                APPEND(" ", 1);
-                APPEND(attribute->name_start, attribute->name_length);
 
-                // Spec.: “For attributes on HTML elements set by the HTML parser […], the
-                // local name will be lowercase.”
-
-                for (int i = attribute->name_length + 1; i >= 1; --i) {
-                    result.data[result.length - i] = tolower(result.data[result.length - i]);
+                EXTEND(1 + attribute->name_length + 2);
+                result.data[result.length++] = ' ';
+                for (int i = 0; i < attribute->name_length; ++i) {
+                    result.data[result.length++] = tolower(attribute->name_start[i]);
                 }
-
-                APPEND("=\"", 2)
+                result.data[result.length++] = '=';
+                result.data[result.length++] = '"';
 
                 struct String value = {(char *) attribute->value_start, attribute->value_length, false};
                 entities_to_utf8(&value, false); // TODO check malloc failure
-                escape(&value, true);
+                //escape(&value, true);
                 APPEND(value.data, value.length)
                 string_free(value);
+
+                /*
+                EXTEND(attribute->value_length);
+                result.length += entities_to_utf8_(attribute->value_start, attribute->value_length,
+                    &result.data[result.length], false);
+                */
 
                 APPEND("\"", 1)
                 attribute += 1;
 
             }
-            APPEND(">", 1)
+
+            result.data[result.length++] = '>';
         }
         int preceding_nesting_level = n->nesting_level;
         int next_nesting_level = n == last_node ||
@@ -1990,12 +2231,13 @@ static struct String HtmlDocument_get_html(struct HtmlDocument *doc, int node, b
                     counterpart->nesting_level == preceding_nesting_level &&
                     n->type == NODE_TYPE_NONVOID_ELEMENT)
                 {
-                    APPEND("</", 2);
-                    APPEND(counterpart->name_start, counterpart->name_length);
-                    for (int i = counterpart->name_length + 1; i >= 1; --i) {
-                        result.data[result.length - i] = tolower(result.data[result.length - i]);
+                    EXTEND(2 + counterpart->name_length + 1);
+                    result.data[result.length++] = '<';
+                    result.data[result.length++] = '/';
+                    for (int i = 0; i < counterpart->name_length; ++i) {
+                        result.data[result.length++] = tolower(counterpart->name_start[i]);
                     }
-                    APPEND(">", 1);
+                    result.data[result.length++] = '>';
                     preceding_nesting_level -= 1;
                 }
                 counterpart -= 1;

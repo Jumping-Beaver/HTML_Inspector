@@ -86,17 +86,19 @@ static void benchmark()
     const char *html = read_test_file();
     int i;
     struct timespec start, end;
-    struct HtmlDocument *hi;
-    hi = HtmlDocument(html);
-    //HtmlDocument_print_stats(hi);
-    HtmlDocument_dump(hi); return;
+    struct HtmlDocument *doc;
+    doc = HtmlDocument(html);
+    //HtmlDocument_print_stats(doc);
+    //HtmlDocument_dump(doc); return;
+    puts(HtmlDocument_get_outer_html(doc, 0).data);
+    //return;
     int node = 0;
     clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &start);
     for (i = 0; i < 200; ++i) {
-        string_free(HtmlDocument_get_outer_html(hi, 0));
+        string_free(HtmlDocument_get_outer_html(doc, 0));
     }
     printf("%d\n", node);
-    HtmlDocument_free(hi);
+    HtmlDocument_free(doc);
     clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &end);
 
     long elapsed_nsec = (end.tv_sec - start.tv_sec) * 1e+9 + (end.tv_nsec - start.tv_nsec);
@@ -227,8 +229,8 @@ static void test_outer_html()
 
 int main()
 {
-    test_outer_html();
-    //benchmark();
+    //test_outer_html();
+    benchmark();
     //test_extract_charset();
     test_resolve_iri();
     return 0;
