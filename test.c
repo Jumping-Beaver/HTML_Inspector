@@ -87,10 +87,10 @@ static void benchmark()
     int i;
     struct timespec start, end;
     struct HtmlDocument *doc;
-    doc = HtmlDocument(html);
+    doc = HtmlDocument(html, strlen(html));
     //HtmlDocument_print_stats(doc);
     //HtmlDocument_dump(doc); return;
-    puts(HtmlDocument_get_outer_html(doc, 0).data);
+    //puts(HtmlDocument_get_outer_html(doc, 0, false).data);
     //return;
     int node = 0;
     clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &start);
@@ -197,7 +197,7 @@ static void test_outer_html()
         {"<body a='<>&quot;'>&auml;&gt;&lt;&quot;&z", "<html><head></head><body a=\"<>&quot;\">ä&gt;&lt;\"&amp;z</body></html>"},
         {"<HTML LANG=en><META></HTML>", "<html lang=\"en\"><head><meta></head></html>"},
         {"<!----><title>t", "<!----><html><head><title>t</title></head></html>"},
-        {"<html><!----></html>", "<html><!----></html>"},
+        {"<html><!--&uuml;--></html>", "<html><!--&uuml;--></html>"},
         {"<html><head>a</head><body></body></html>", "<html><head></head><body>a</body></html>"},
         {"<head>a</head><body></body>", "<html><head></head><body>a</body></html>"},
         {"<head>a<body>b", "<html><head></head><body>ab</body></html>"}, // TODO We get 2 text nodes here
@@ -212,7 +212,7 @@ static void test_outer_html()
         {"<title>a", "<html><head><title>a</title></head></html>"},
     };
     for (int i = 0; i < sizeof test_cases / sizeof *test_cases; ++i) {
-        struct HtmlDocument *doc = HtmlDocument(test_cases[i].input);
+        struct HtmlDocument *doc = HtmlDocument(test_cases[i].input, strlen(test_cases[i].input));
         if (doc == NULL) {
             printf("OOM\n");
             continue;
@@ -229,9 +229,9 @@ static void test_outer_html()
 
 int main()
 {
-    //test_outer_html();
-    benchmark();
+    test_outer_html();
+    //benchmark();
     //test_extract_charset();
-    test_resolve_iri();
+    //test_resolve_iri();
     return 0;
 }

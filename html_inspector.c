@@ -5,7 +5,7 @@
 #include <stdbool.h>
 #include <ctype.h>
 
-static const char *ENTITIES[256] = {
+static const unsigned char *ENTITIES[256] = {
     ['A'] =
     "&AElig;Æ&AMP;&&Aacute;Á&Abreve;Ă&Acirc;Â&Acy;А&Afr;𝔄&Agrave;À&Alpha;Α&Amacr;Ā&And;⩓&Aogon;Ą"
     "&Aopf;𝔸&ApplyFunction;⁡&Aring;Å&Ascr;𝒜&Assign;≔&Atilde;Ã&Auml;Ä",
@@ -365,83 +365,21 @@ struct String {
 #define STRING(cstring) (struct String) {cstring, sizeof cstring - 1, 0}
 #define NULL_STRING (struct String) {NULL, 0, false}
 
-/*
-// See: https://www.w3.org/TR/2010/WD-html5-20101019/syntax.html#elements-0
-//
-// ESCAPE_RAWTEXT: Escape nothing. Use this for script & style (RAWTEXT content).
-//
-// ESCAPE_ATTRIBUTE: Escape the characters `"`, `&` and `\xC2\xA0` in attribute values.
-//
-// ESCAPE_RCDATA_OR_PLAINTEXT: Escape the characters `<`, `>`, `&`, `\xC2\xA0` in textarea & title
-// (RCDATA content) and in text nodes (PLAINTEXT content).
-//
-// RCDATA and PLAINTEXT are escaped in the same way. The difference is in the parsing behavior,
-// namely `<` may occur only in RCDATA.
-
-enum EscapeMode {
-    ESCAPE_RAWTEXT,
-    ESCAPE_ATTRIBUTE,
-    ESCAPE_RCDATA_OR_PLAINTEXT,
-};
-*/
-
-static size_t entities_to_utf8_(const char *input, size_t length, char *output, size_t capacity,
-    bool attribute_mode, bool skip_stray_tags)
+static size_t entities_to_utf8(const unsigned char *input, size_t input_length, unsigned char *output,
+    bool skip_stray_tags)
 {
-    // Returns the number of bytes that have been consumed from `input`.
-    // `capacity` must be >= MAX(40, 6)!
+    // When using this function we make use of the fact that the number of bytes written to output
+    // is never greater than `input_length`.
 
-    const char *output_start = output;
-    size_t i, k;
-    for (i = 0; i < length && capacity - output + output_start >= 40; ++i) {
+    size_t i = 0, k;
+    const unsigned char *original_output = output;
+    for (i = 0; i < input_length; ++i) {
         if (skip_stray_tags && input[i] == '<') { // Skipping stray tags
             do {
                 i += 1;
-            } while (i < length && input[i] != '>');
+            } while (i < input_length && input[i] != '>');
             continue;
         }
-        if (!attribute_mode && input[i] == '<') {
-            output++ = '&';
-            output++ = 'l';
-            output++ = 't';
-            output++ = ';';
-            continue;
-        }
-        if (!attribute_mode && input[i] == '>') {
-            output++ = '&';
-            output++ = 'g';
-            output++ = 't';
-            output++ = ';';
-            continue;
-        }
-        if (input[i] == '&') {
-            output++ = '&';
-            output++ = 'a';
-            output++ = 'm';
-            output++ = 'p';
-            output++ = ';';
-            continue;
-        }
-        if (attribute_mode && input[i] == '"') {
-            output++ = '&';
-            output++ = 'q';
-            output++ = 'u';
-            output++ = 'o';
-            output++ = 't';
-            output++ = ';';
-            continue;
-        }
-        if (input[i] == 0xC2 && i + 1 < length && input[i + 1] == 0xA0) {
-            output++ = '&';
-            output++ = 'n';
-            output++ = 'b';
-            output++ = 's';
-            output++ = 'p';
-            output++ = ';';
-            i += 1;
-            continue;
-        }
-
         if (input[i] != '&') {
             *output++ = input[i];
             continue;
@@ -476,14 +414,7 @@ static size_t entities_to_utf8_(const char *input, size_t length, char *output, 
                     }
                 }
             }
-            if (codepoint < 0 || codepoint > 0x7FFFFFFF ||
-                escape_mode === ESCAPE_ATTRIBUTE && (
-                    codepoint == '"' || codepoint == '&' || codepoint == \xA0
-                ) ||
-                escape_mode === ESCAPE_RCDATA_OR_PLAINTEXT && (
-                    codepoint == '<' || codepoint == '>' || codepoint == '&' || codepoint == \xA0
-                )
-            ) {
+            if (codepoint < 0 || codepoint > 0x7FFFFFFF) {
                 *output++ = '&';
                 continue;
             }
@@ -526,14 +457,14 @@ static size_t entities_to_utf8_(const char *input, size_t length, char *output, 
             }
             continue;
         }
-        if (i + 1 == length || ENTITIES[input[i + 1]] == NULL) {
+        if (i + 1 == input_length || ENTITIES[input[i + 1]] == NULL) {
             *output++ = '&';
             continue;
         }
         unsigned char entity[40] = {'&'};
         k = 1;
         do {
-            if (k == sizeof entity - 1 || i + k == length) {
+            if (k == sizeof entity - 1 || i + k == input_length) {
                 break;
             }
             entity[k] = input[i + k];
@@ -543,7 +474,7 @@ static size_t entities_to_utf8_(const char *input, size_t length, char *output, 
             continue;
         }
         entity[k] = '\0';
-        const char *pos = strstr(ENTITIES[entity[1]], entity);
+        const unsigned char *pos = strstr(ENTITIES[entity[1]], entity);
         if (pos == NULL) {
             *output++ = '&';
             continue;
@@ -556,174 +487,7 @@ static size_t entities_to_utf8_(const char *input, size_t length, char *output, 
             *output++ = pos[k++];
         }
     }
-    //return output - output_start;
-    return i - 1;
-}
-
-/*
-There are two ways to convert entitites to utf8 and escape special characters without doing
-mallocs inside these function.
-
-1.
-extend the result capacity by the value length, assuming that entities_to_utf8 will never lengthen the input
-entities_to_utf8 -> append to result
-get_escape_length of the appended piece
-extend the capacity of the result by get_escape_length - appended length
-escape (input, input_length, output, escape_length) -> rewrite the string BACKWARDS
-
-2.
-Integrate the escaping in entities_to_utf8. Problem: now the output can be longer than the input
-So we will return the number of consumed input bytes and call the function in a loop
-
-Performance consideration: Hard to estimate without testing.
-
-In (1) we write the whole string twice if there are escapable characters.
-
-In (2) we write only once but we have to check that the output length does not exceed the capacity
-in every loop iteration.
-*/
-
-static void entities_to_utf8(struct String *input, bool skip_stray_tags)
-{
-    struct String result = (struct String) {malloc(input->length), 0, true};
-    if (result.data == NULL) {
-        if (input->is_malloced) {
-            free(input->data);
-        }
-        *input = NULL_STRING;
-        return;
-    }
-
-    int i, k;
-
-    for (i = 0; i < input->length; ++i) {
-        if (skip_stray_tags && input->data[i] == '<') { // Skipping stray tags
-            do {
-                i += 1;
-            } while (i < input->length && input->data[i] != '>');
-            continue;
-        }
-        if (input->data[i] != '&') {
-            result.data[result.length] = input->data[i];
-            result.length += 1;
-            continue;
-        }
-        if (input->data[i + 1] == '#') {
-            int codepoint = 0;
-            if (input->data[i + 2] == 'x') {
-                for (k = 3; input->data[i + k] != ';'; ++k) {
-                    if (input->data[i + k] >= '0' && input->data[i + k] <= '9') {
-                        codepoint = codepoint * 16 + (input->data[i + k] - '0');
-                    }
-                    else if (input->data[i + k] >= 'A' && input->data[i + k] <= 'F') {
-                        codepoint = codepoint * 16 + (10 + input->data[i + k] - 'A');
-                    }
-                    else if (input->data[i + k] >= 'a' && input->data[i + k] <= 'f') {
-                        codepoint = codepoint * 16 + (10 + input->data[i + k] - 'a');
-                    }
-                    else {
-                        codepoint = -1;
-                        break;
-                    }
-                }
-            }
-            else {
-                for (k = 2; input->data[i + k] != ';'; ++k) {
-                    if (input->data[i + k] >= '0' && input->data[i + k] <= '9') {
-                        codepoint = codepoint * 10 + (input->data[i + k] - '0');
-                    }
-                    else {
-                        codepoint = -1;
-                        break;
-                    }
-                }
-            }
-            if (codepoint < 0 || codepoint > 0x7FFFFFFF) {
-                result.data[result.length++] = '&';
-                continue;
-            }
-            i += k;
-
-            // See `man utf-8`
-
-            if (codepoint <= 0x7F) {
-                result.data[result.length++] = codepoint;
-            }
-            else if (codepoint <= 0x7FF) {
-                result.data[result.length++] = 0b11000000 + (codepoint >> 6);
-                result.data[result.length++] = (10 << 6) + (codepoint & 0b111111);
-            }
-            else if (codepoint <= 0xFFFF) {
-                result.data[result.length++] = 0b11100000 + (codepoint >> 12);
-                result.data[result.length++] = (10 << 6) + ((codepoint >> 6) & 0b111111);
-                result.data[result.length++] = (10 << 6) + (codepoint & 0b111111);
-            }
-            else if (codepoint <= 0x1FFFFF) {
-                result.data[result.length++] = 0b11110000 + (codepoint >> 18);
-                result.data[result.length++] = (10 << 6) + ((codepoint >> 12) & 0b111111);
-                result.data[result.length++] = (10 << 6) + ((codepoint >> 6) & 0b111111);
-                result.data[result.length++] = (10 << 6) + (codepoint & 0b111111);
-            }
-            else if (codepoint <= 0x03FFFFFF) {
-                result.data[result.length++] = 0b11111000 + (codepoint >> 24);
-                result.data[result.length++] = (10 << 6) + ((codepoint >> 18) & 0b111111);
-                result.data[result.length++] = (10 << 6) + ((codepoint >> 12) & 0b111111);
-                result.data[result.length++] = (10 << 6) + ((codepoint >> 6) & 0b111111);
-                result.data[result.length++] = (10 << 6) + (codepoint & 0b111111);
-            }
-            else if (codepoint <= 0x7FFFFFFF) {
-                result.data[result.length++] = 0b1111110 + (codepoint >> 30);
-                result.data[result.length++] = (10 << 6) + ((codepoint >> 24) & 0b111111);
-                result.data[result.length++] = (10 << 6) + ((codepoint >> 18) & 0b111111);
-                result.data[result.length++] = (10 << 6) + ((codepoint >> 12) & 0b111111);
-                result.data[result.length++] = (10 << 6) + ((codepoint >> 6) & 0b111111);
-                result.data[result.length++] = (10 << 6) + (codepoint & 0b111111);
-            }
-            continue;
-        }
-        if (i + 1 == input->length || ENTITIES[input->data[i + 1]] == NULL) {
-            result.data[result.length++] = '&';
-            continue;
-        }
-        unsigned char entity[40] = {'&'};
-        k = 1;
-        do {
-            if (k == sizeof entity - 1 || i + k == input->length) {
-                break;
-            }
-            entity[k] = input->data[i + k];
-        } while (entity[k++] != ';');
-        if (entity[k - 1] != ';') {
-            result.data[result.length++] = '&';
-            continue;
-        }
-        entity[k] = '\0';
-        const char *pos = strstr(ENTITIES[entity[1]], entity);
-        if (pos == NULL) {
-            result.data[result.length++] = '&';
-            continue;
-        }
-        i += k - 1;
-        if (pos[k] == '&') { // Special case for the &amp; entity
-            result.data[result.length++] = '&';
-        }
-        while (pos[k] != '&' && pos[k] != '\0') {
-            result.data[result.length++] = pos[k++];
-        }
-    }
-    if (input->is_malloced) {
-        free(input->data);
-    }
-    if (input->length != result.length) {
-        char *realloced = realloc(result.data, result.length);
-        if (realloced == NULL) {
-            free(result.data);
-            *input = NULL_STRING;
-            return;
-        }
-        result.data = realloced;
-    }
-    *input = result;
+    return output - original_output;
 }
 
 void string_free(struct String string)
@@ -901,7 +665,6 @@ static bool parse_attribute(struct Attribute *attribute, const unsigned char **h
 
 struct String HtmlDocument_extract_charset(const unsigned char *html)
 {
-    struct Attribute attribute;
     const unsigned char *html_start = html;
     while (true) {
         if (*html == '\0') {
@@ -949,62 +712,81 @@ struct String HtmlDocument_extract_charset(const unsigned char *html)
         }
         html += sizeof "<meta" - 1;
         bool has_http_equiv_content_type = false;
-        struct String content = NULL_STRING;
-        while (parse_attribute(&attribute, &html)) {
-            if (!strnicmp(attribute.name_start, "charset", attribute.name_length)) {
-                struct String result = {(char *) attribute.value_start, attribute.value_length, false};
-                entities_to_utf8(&result, false);
-                return result;
+        char *content = NULL;
+        size_t content_length;
+        struct Attribute attr;
+        while (parse_attribute(&attr, &html)) {
+            if (!strnicmp(attr.name_start, "charset", attr.name_length)) {
+                unsigned char *buffer = malloc(attr.value_length);
+                if (buffer == NULL) {
+                    return NULL_STRING;
+                }
+                size_t buffer_length = entities_to_utf8(attr.value_start, attr.value_length, buffer, false);
+                unsigned char *buffer_realloc = realloc(buffer, buffer_length);
+                if (buffer_realloc == NULL) {
+                    free(buffer);
+                    return NULL_STRING;
+                }
+                return (struct String) {buffer_realloc, buffer_length, true};
             }
-            if (!strnicmp(attribute.name_start, "content", attribute.name_length)) {
-                content.data = (char *) attribute.value_start;
-                content.length = attribute.value_length;
+            if (!strnicmp(attr.name_start, "content", attr.name_length)) {
+                content = (unsigned char *) attr.value_start;
+                content_length = attr.value_length;
             }
-            else if (!strnicmp(attribute.name_start, "http-equiv", attribute.name_length)) {
-                struct String attrval = {(char *) attribute.value_start, attribute.value_length, false};
-                entities_to_utf8(&attrval, false);
-                if (!strnicmp(attrval.data, "content-type", attrval.length)) {
+            else if (!strnicmp(attr.name_start, "http-equiv", attr.name_length)) {
+                unsigned char *buffer = malloc(attr.value_length);
+                if (buffer == NULL) {
+                    return NULL_STRING;
+                }
+                size_t buffer_length = entities_to_utf8(attr.value_start, attr.value_length, buffer, false);
+                if (!strnicmp(buffer, "content-type", buffer_length)) {
                     has_http_equiv_content_type = true;
                 }
-                string_free(attrval);
+                free(buffer);
             }
         }
-        if (has_http_equiv_content_type && content.data != NULL) {
-            entities_to_utf8(&content, false);
+        if (has_http_equiv_content_type && content != NULL) {
+            unsigned char *buffer = malloc(content_length);
+            if (buffer == NULL) {
+                return NULL_STRING;
+            }
+            content_length = entities_to_utf8(content, content_length, buffer, false);
+            content = buffer;
+
             int charset_begin = 0, charset_length = 0;
-            for (; charset_begin < content.length; ++charset_begin) {
-                if (content.data[charset_begin] != ';') {
+            for (; charset_begin < content_length; ++charset_begin) {
+                if (content[charset_begin] != ';') {
                     continue;
                 }
                 do {
                     charset_begin += 1;
-                } while (CHARMASK_WHITESPACE[content.data[charset_begin]]);
-                if (strncmp(&content.data[charset_begin], "charset", sizeof "charset" - 1)) {
+                } while (CHARMASK_WHITESPACE[content[charset_begin]]);
+                if (strncmp(&content[charset_begin], "charset", sizeof "charset" - 1)) {
                     continue;
                 }
-                char charset_delim = content.data[charset_begin + sizeof "charset" - 1];
+                char charset_delim = content[charset_begin + sizeof "charset" - 1];
                 if (charset_delim != '=' && !CHARMASK_WHITESPACE[charset_delim]) {
                     continue;
                 }
                 charset_begin += sizeof "charset" - 1;
-                while (CHARMASK_WHITESPACE[content.data[charset_begin]]) {
+                while (CHARMASK_WHITESPACE[content[charset_begin]]) {
                     charset_begin += 1;
                 }
-                if (content.data[charset_begin] != '=') {
+                if (content[charset_begin] != '=') {
                     continue;
                 }
                 do {
                     charset_begin += 1;
-                } while (CHARMASK_WHITESPACE[content.data[charset_begin]]);
-                if (content.data[charset_begin] == '"') {
+                } while (CHARMASK_WHITESPACE[content[charset_begin]]);
+                if (content[charset_begin] == '"') {
                     // Quotes around charset are valid: https://www.ietf.org/rfc/rfc2045.txt
                     charset_begin += 1;
                 }
                 while (
-                    charset_begin + charset_length < content.length &&
-                    !CHARMASK_WHITESPACE[content.data[charset_begin + charset_length]] &&
-                    content.data[charset_begin + charset_length] != ';'&&
-                    content.data[charset_begin + charset_length] != '"'
+                    charset_begin + charset_length < content_length &&
+                    !CHARMASK_WHITESPACE[content[charset_begin + charset_length]] &&
+                    content[charset_begin + charset_length] != ';'&&
+                    content[charset_begin + charset_length] != '"'
                 ) {
                     charset_length += 1;
                 }
@@ -1012,11 +794,11 @@ struct String HtmlDocument_extract_charset(const unsigned char *html)
             }
             struct String result = {malloc(charset_length), charset_length, true};
             if (result.data == NULL) {
-                string_free(content);
+                free(content);
                 return NULL_STRING;
             }
-            memcpy(result.data, &content.data[charset_begin], charset_length);
-            string_free(content);
+            memcpy(result.data, &content[charset_begin], charset_length);
+            free(content);
             return result;
         }
     }
@@ -1032,13 +814,12 @@ void HtmlDocument_free(struct HtmlDocument *doc)
     free(doc);
 }
 
-static struct HtmlDocument * HtmlDocument(const unsigned char *html)
+static struct HtmlDocument * HtmlDocument(const unsigned char *html, size_t html_strlen)
 {
     // Minimizing the number of `realloc` calls is essential to achieve the best performance. We
     // use heuristic starting values depending on the input length. `strlen` is very fast.
     // `*_capacity` must be greater than zero to avoid invalid memory write operations.
 
-    size_t html_strlen = strlen(html);
     size_t nodes_capacity = 100 + html_strlen / 40;
     size_t attributes_capacity = 100 + nodes_capacity * 2.4;
 
@@ -1744,37 +1525,40 @@ static bool Selector_filter(struct Selector *sel, struct SelectorItem *si, struc
         if (si->type == FILTER_ATTRIBUTE_EXISTS) {
             return true;
         }
-        struct String attr_string = {(char *) attr->value_start, attr->value_length, false};
-        entities_to_utf8(&attr_string, false);
+        unsigned char *value = malloc(attr->value_length);
+        if (value == NULL) {
+            return -1; // TODO
+        }
+        size_t value_length = entities_to_utf8(attr->value_start, attr->value_length, value, false);
 
         bool matches = false;
         if (si->type == FILTER_ATTRIBUTE_EQUALS) {
-            matches = attr_string.length == strlen(si->filter_data.arg2) &&
-                      !strncmp(si->filter_data.arg2, attr_string.data, attr_string.length);
+            matches = value_length == strlen(si->filter_data.arg2) &&
+                      !strncmp(si->filter_data.arg2, value, value_length);
         }
         else if (si->type == FILTER_ATTRIBUTE_EQUALS_I) {
-            matches = attr_string.length == strlen(si->filter_data.arg2) &&
-                      !strnicmp(si->filter_data.arg2, attr_string.data, attr_string.length);
+            matches = value_length == strlen(si->filter_data.arg2) &&
+                      !strnicmp(si->filter_data.arg2, value, value_length);
         }
         else if (si->type == FILTER_ATTRIBUTE_CONTAINS) {
-            matches = str_contains(attr_string.data, attr_string.length, si->filter_data.arg2, false, false);
+            matches = str_contains(value, value_length, si->filter_data.arg2, false, false);
         }
         else if (si->type == FILTER_ATTRIBUTE_CONTAINS_I) {
-            matches = str_contains(attr_string.data, attr_string.length, si->filter_data.arg2, false, true);
+            matches = str_contains(value, value_length, si->filter_data.arg2, false, true);
         }
         else if (si->type == FILTER_ATTRIBUTE_CONTAINS_WORD) {
-            matches = str_contains(attr_string.data, attr_string.length, si->filter_data.arg2, true, false);
+            matches = str_contains(value, value_length, si->filter_data.arg2, true, false);
         }
         else if (si->type == FILTER_ATTRIBUTE_CONTAINS_WORD_I) {
-            matches = str_contains(attr_string.data, attr_string.length, si->filter_data.arg2, true, true);
+            matches = str_contains(value, value_length, si->filter_data.arg2, true, true);
         }
         else if (si->type == FILTER_ATTRIBUTE_STARTS_WITH) {
-            matches = !strncmp(si->filter_data.arg2, attr_string.data, strlen(si->filter_data.arg2));
+            matches = !strncmp(si->filter_data.arg2, value, strlen(si->filter_data.arg2));
         }
         else if (si->type == FILTER_ATTRIBUTE_STARTS_WITH_I) {
-            matches = !strnicmp(si->filter_data.arg2, attr_string.data, strlen(si->filter_data.arg2));
+            matches = !strnicmp(si->filter_data.arg2, value, strlen(si->filter_data.arg2));
         }
-        string_free(attr_string);
+        free(value);
 
         if (matches) {
             return true;
@@ -2000,18 +1784,22 @@ struct String HtmlDocument_get_value(struct HtmlDocument *doc, int node)
     if (node < 0 || node >= doc->node_count) {
         return NULL_STRING;
     }
-    if (doc->nodes[node].type == NODE_TYPE_COMMENT || doc->nodes[node].type == NODE_TYPE_TEXT ||
-        doc->nodes[node].type == NODE_TYPE_CDATA)
-    {
-        struct String value = {
-            (unsigned char *) doc->nodes[node].value_start,
-            doc->nodes[node].value_length,
-            false
-        };
-        if (doc->nodes[node].type != NODE_TYPE_CDATA) {
-            entities_to_utf8(&value, true);
+    struct Node *n = &doc->nodes[node];
+    if (n->type == NODE_TYPE_CDATA || n->type == NODE_TYPE_COMMENT) {
+        return (struct String) {(unsigned char *) n->value_start, n->value_length, false};
+    }
+    if (n->type == NODE_TYPE_TEXT) {
+        unsigned char *buffer = malloc(n->value_length);
+        if (buffer == NULL) {
+            return NULL_STRING;
         }
-        return value;
+        size_t buffer_length = entities_to_utf8(n->value_start, n->value_length, buffer, true);
+        unsigned char *buffer_realloc = realloc(buffer, buffer_length);
+        if (buffer_realloc == NULL) {
+            free(buffer);
+            return NULL_STRING;
+        }
+        return (struct String) {buffer_realloc, buffer_length, true};
     }
     return NULL_STRING;
 }
@@ -2021,100 +1809,111 @@ struct String HtmlDocument_get_attribute(struct HtmlDocument *doc, int node, con
     if (node < 0 || node >= doc->node_count) {
         return NULL_STRING;
     }
-    int strlen_attribute = strlen(attribute);
+    size_t strlen_attribute = strlen(attribute);
     struct Attribute *attributes = &doc->attributes[doc->nodes[node].attributes_start];
     for (int i = 0; i < doc->nodes[node].attributes_count; ++i) {
         if (attributes[i].name_length == strlen_attribute &&
             !strnicmp(attributes[i].name_start, attribute, attributes[i].name_length))
         {
-            struct String result = {(char *) attributes[i].value_start,attributes[i].value_length, false};
-            entities_to_utf8(&result, false);
-            return result;
+            struct Attribute *a = &attributes[i];
+            unsigned char *buffer = malloc(a->value_length);
+            if (buffer == NULL) {
+                return NULL_STRING;
+            }
+            size_t buffer_length = entities_to_utf8(a->value_start, a->value_length, buffer, false);
+            unsigned char *buffer_realloc = realloc(buffer, buffer_length);
+            if (buffer_realloc == NULL) {
+                free(buffer);
+                return NULL_STRING;
+            }
+            return (struct String) {buffer, buffer_length, true};
         }
     }
     return NULL_STRING;
 }
 
-static int escape(struct String *html, bool attribute_mode)
+static size_t get_escape_length(const unsigned char *html, size_t length, bool is_attribute)
 {
+    size_t escape_length = length, i = length;
+    while (i-- > 0) {
+        if (!is_attribute && html[i] == '<') {
+            escape_length += sizeof "&lt;" - 2;
+        }
+        else if (!is_attribute && html[i] == '>') {
+            escape_length += sizeof "&gt;" - 2;
+        }
+        else if (html[i] == '&') {
+            escape_length += sizeof "&amp;" - 2;
+        }
+        else if (is_attribute && html[i] == '"') {
+            escape_length += sizeof "&quot;" - 2;
+        }
+        else if (html[i] == 0xA0 && i > 0 && html[i - 1] == 0xC2) {
+            escape_length += sizeof "&nbsp;" - 3;
+            i -= 1;
+        }
+    }
+    return escape_length;
+}
+
+static void escape_inplace(unsigned char *input, size_t input_length, size_t escape_length,
+    bool is_attribute)
+{
+    // We exploit the fact that the escaped string will never be smaller than
+    // the input. This makes it possible to rewrite the input in-place from its end.
+    //
     // https://dev.w3.org/html5/spec-LC/the-end.html#html-fragment-serialization-algorithm
     // Section: “Escaping a string”
 
-    int result_length = html->length;
-    for (int i = 0; i < html->length; ++i) {
-        if (!attribute_mode && html->data[i] == '<') {
-            result_length += sizeof "&lt;" - 2;
-        }
-        else if (!attribute_mode && html->data[i] == '>') {
-            result_length += sizeof "&gt;" - 2;
-        }
-        else if (html->data[i] == '&') {
-            result_length += sizeof "&amp;" - 2;
-        }
-        else if (attribute_mode && html->data[i] == '"') {
-            result_length += sizeof "&quot;" - 2;
-        }
-        else if (html->data[i] == 0xC2 && i + 1 < html->length && html->data[i + 1] == 0xA0) {
-            result_length += sizeof "&nbsp;" - 3;
-            i += 1;
-        }
+    if (input_length == escape_length) {
+        return;
     }
-    if (result_length == html->length) {
-        return 0;
-    }
-    struct String result = {malloc(result_length), 0, true};
-    if (result.data == NULL) {
-        return 1;
-    }
-    for (int i = 0; i < html->length; ++i) {
-        if (!attribute_mode && html->data[i] == '<') {
-            result.data[result.length++] = '&';
-            result.data[result.length++] = 'l';
-            result.data[result.length++] = 't';
-            result.data[result.length++] = ';';
+    size_t e = escape_length - 1;
+    size_t i = input_length;
+    while (i-- > 0) {
+        if (!is_attribute && input[i] == '<') {
+            input[e--] = ';';
+            input[e--] = 't';
+            input[e--] = 'l';
+            input[e--] = '&';
         }
-        else if (!attribute_mode && html->data[i] == '>') {
-            result.data[result.length++] = '&';
-            result.data[result.length++] = 'g';
-            result.data[result.length++] = 't';
-            result.data[result.length++] = ';';
+        else if (!is_attribute && input[i] == '>') {
+            input[e--] = ';';
+            input[e--] = 't';
+            input[e--] = 'g';
+            input[e--] = '&';
         }
-        else if (html->data[i] == '&') {
-            result.data[result.length++] = '&';
-            result.data[result.length++] = 'a';
-            result.data[result.length++] = 'm';
-            result.data[result.length++] = 'p';
-            result.data[result.length++] = ';';
+        else if (input[i] == '&') {
+            input[e--] = ';';
+            input[e--] = 'p';
+            input[e--] = 'm';
+            input[e--] = 'a';
+            input[e--] = '&';
         }
-        else if (attribute_mode && html->data[i] == '"') {
-            result.data[result.length++] = '&';
-            result.data[result.length++] = 'q';
-            result.data[result.length++] = 'u';
-            result.data[result.length++] = 'o';
-            result.data[result.length++] = 't';
-            result.data[result.length++] = ';';
+        else if (is_attribute && input[i] == '"') {
+            input[e--] = ';';
+            input[e--] = 't';
+            input[e--] = 'o';
+            input[e--] = 'u';
+            input[e--] = 'q';
+            input[e--] = '&';
         }
-        else if (html->data[i] == 0xC2 && i + 1 < html->length && html->data[i + 1] == 0xA0) {
-            result.data[result.length++] = '&';
-            result.data[result.length++] = 'n';
-            result.data[result.length++] = 'b';
-            result.data[result.length++] = 's';
-            result.data[result.length++] = 'p';
-            result.data[result.length++] = ';';
-            i += 1;
+        else if (input[i] == 0xA0 && i > 0 && input[i - 1] == 0xC2) {
+            input[e--] = ';';
+            input[e--] = 'p';
+            input[e--] = 's';
+            input[e--] = 'b';
+            input[e--] = 'n';
+            input[e--] = '&';
+            i -= 1;
         }
         else {
-            result.data[result.length++] = html->data[i];
+            input[e--] = input[i];
         }
     }
-    if (html->is_malloced) {
-        free(html->data);
-    }
-    *html = result;
-    return 0;
 }
 
-static struct String HtmlDocument_get_html(struct HtmlDocument *doc, int node, bool inner)
+struct String HtmlDocument_get_html(struct HtmlDocument *doc, int node, bool inner)
 {
     // https://dev.w3.org/html5/spec-LC/the-end.html#html-fragment-serialization-algorithm
     //
@@ -2128,6 +1927,10 @@ static struct String HtmlDocument_get_html(struct HtmlDocument *doc, int node, b
     }
     size_t result_capacity = doc->html_strlen;
     struct String result = {malloc(result_capacity), 0, true};
+    if (result.data == NULL) {
+        return NULL_STRING;
+    }
+
     #define EXTEND(_length) \
         if (result.length + _length >= result_capacity) { \
             result_capacity += _length + 1024; \
@@ -2138,10 +1941,6 @@ static struct String HtmlDocument_get_html(struct HtmlDocument *doc, int node, b
             } \
             result.data = r; \
         }
-    #define APPEND(_data, _length) \
-        EXTEND(_length) \
-        memcpy(&result.data[result.length], _data, _length); \
-        result.length += _length;
 
     if (node == 0) {
         inner = true;
@@ -2166,23 +1965,18 @@ static struct String HtmlDocument_get_html(struct HtmlDocument *doc, int node, b
         }
         else if (n->type == NODE_TYPE_TEXT) {
             EXTEND(n->value_length);
-            //result.length += entities_to_utf8_(n->value_start, n->value_length,
-            //    &result.data[result.length], true);
+            size_t utf8_length = entities_to_utf8(n->value_start, n->value_length,
+                &result.data[result.length], true);
+            size_t escape_length = get_escape_length(&result.data[result.length], utf8_length, false);
+            EXTEND(escape_length);
+            escape_inplace(&result.data[result.length], utf8_length, escape_length, false);
+            result.length += escape_length;
         }
         else if (n->type == NODE_TYPE_CDATA) {
             EXTEND(n->value_length);
             memcpy(&result.data[result.length], n->value_start, n->value_length);
+            result.length += n->value_length;
         }
-        /*else if (n->type == NODE_TYPE_TEXT || n->type == NODE_TYPE_CDATA) {
-            struct String value = {(char *) n->value_start, n->value_length, false};
-            if (n->type != NODE_TYPE_CDATA) {
-                entities_to_utf8(&value, true); // TODO check malloc failure
-                escape(&value, false);
-            }
-            APPEND(value.data, value.length)
-            string_free(value);
-        }
-        */
         else {
             EXTEND(1 + n->name_length + 1);
             result.data[result.length++] = '<';
@@ -2201,21 +1995,18 @@ static struct String HtmlDocument_get_html(struct HtmlDocument *doc, int node, b
                 result.data[result.length++] = '=';
                 result.data[result.length++] = '"';
 
-                struct String value = {(char *) attribute->value_start, attribute->value_length, false};
-                entities_to_utf8(&value, false); // TODO check malloc failure
-                //escape(&value, true);
-                APPEND(value.data, value.length)
-                string_free(value);
-
-                /*
-                EXTEND(attribute->value_length);
-                result.length += entities_to_utf8_(attribute->value_start, attribute->value_length,
+                EXTEND(n->value_length);
+                size_t utf8_length = entities_to_utf8(attribute->value_start, attribute->value_length,
                     &result.data[result.length], false);
-                */
+                size_t escape_length = get_escape_length(&result.data[result.length], utf8_length, true);
+                EXTEND(escape_length);
+                escape_inplace(&result.data[result.length], utf8_length, escape_length, true);
+                result.length += escape_length;
 
-                APPEND("\"", 1)
+                EXTEND(1);
+                result.data[result.length++] = '"';
+
                 attribute += 1;
-
             }
 
             result.data[result.length++] = '>';
@@ -2248,7 +2039,6 @@ static struct String HtmlDocument_get_html(struct HtmlDocument *doc, int node, b
         }
     }
     return result;
-    #undef APPEND
 }
 
 struct String HtmlDocument_get_inner_html(struct HtmlDocument *doc, int node)

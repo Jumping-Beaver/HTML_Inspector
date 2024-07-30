@@ -86,7 +86,7 @@ ZEND_METHOD(HtmlDocument, __construct)
     ZEND_PARSE_PARAMETERS_START(1, 1)
         Z_PARAM_STR(html)
     ZEND_PARSE_PARAMETERS_END();
-    HTML_DOCUMENT(ZEND_THIS) = HtmlDocument(html->val);
+    HTML_DOCUMENT(ZEND_THIS) = HtmlDocument(html->val, html->len);
     if (HTML_DOCUMENT(ZEND_THIS) == NULL) {
         zend_throw_error(NULL, "malloc failed", 0);
     }
@@ -209,7 +209,7 @@ ZEND_METHOD(HtmlDocument, select)
         return;
     }
     zend_object *object = create_object_selector(class_entry_selector);
-    ZVAL_OBJ_COPY(return_value, object);
+    ZVAL_OBJ(return_value, object);
     SELECTOR(return_value) = sel;
 }
 ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO(arginfo_select, HtmlInspector\\Selector, false)
