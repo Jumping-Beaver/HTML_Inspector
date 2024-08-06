@@ -344,16 +344,36 @@ static const char CHARMASK_ATTRIBUTE_VALUE_END[256] = {
     ['\0'] = 1,
 };
 
-static const char CHARMASK_TAG_NAME_END[256] = {
-    ['\0'] = 1,
-    [ '"'] = 1,
-    ['\''] = 1,
-    [ ' '] = 1,
-    ['\n'] = 1,
-    ['\t'] = 1,
-    ['\r'] = 1,
-    [ '/'] = 1,
-    [ '>'] = 1
+// https://dev.w3.org/html5/spec-LC/syntax.html#syntax-tag-name
+// The `–` for custom elements is yet to be incorporated into this standard.
+
+static const char CHARMASK_VALID_TAG_NAME_START[256] = {
+    ['a'] = 1, ['b'] = 1, ['c'] = 1, ['d'] = 1, ['e'] = 1, ['f'] = 1, ['g'] = 1, ['h'] = 1,
+    ['i'] = 1, ['j'] = 1, ['k'] = 1, ['l'] = 1, ['m'] = 1, ['n'] = 1, ['o'] = 1, ['p'] = 1,
+    ['q'] = 1, ['r'] = 1, ['s'] = 1, ['t'] = 1, ['u'] = 1, ['v'] = 1, ['w'] = 1, ['x'] = 1,
+    ['y'] = 1, ['z'] = 1,
+
+    ['A'] = 1, ['B'] = 1, ['C'] = 1, ['D'] = 1, ['E'] = 1, ['F'] = 1, ['G'] = 1, ['H'] = 1,
+    ['I'] = 1, ['J'] = 1, ['K'] = 1, ['L'] = 1, ['M'] = 1, ['N'] = 1, ['O'] = 1, ['P'] = 1,
+    ['Q'] = 1, ['R'] = 1, ['S'] = 1, ['T'] = 1, ['U'] = 1, ['V'] = 1, ['W'] = 1, ['X'] = 1,
+    ['Y'] = 1, ['Z'] = 1,
+};
+
+static const char CHARMASK_VALID_TAG_NAME[256] = {
+    ['a'] = 1, ['b'] = 1, ['c'] = 1, ['d'] = 1, ['e'] = 1, ['f'] = 1, ['g'] = 1, ['h'] = 1,
+    ['i'] = 1, ['j'] = 1, ['k'] = 1, ['l'] = 1, ['m'] = 1, ['n'] = 1, ['o'] = 1, ['p'] = 1,
+    ['q'] = 1, ['r'] = 1, ['s'] = 1, ['t'] = 1, ['u'] = 1, ['v'] = 1, ['w'] = 1, ['x'] = 1,
+    ['y'] = 1, ['z'] = 1,
+
+    ['A'] = 1, ['B'] = 1, ['C'] = 1, ['D'] = 1, ['E'] = 1, ['F'] = 1, ['G'] = 1, ['H'] = 1,
+    ['I'] = 1, ['J'] = 1, ['K'] = 1, ['L'] = 1, ['M'] = 1, ['N'] = 1, ['O'] = 1, ['P'] = 1,
+    ['Q'] = 1, ['R'] = 1, ['S'] = 1, ['T'] = 1, ['U'] = 1, ['V'] = 1, ['W'] = 1, ['X'] = 1,
+    ['Y'] = 1, ['Z'] = 1,
+
+    ['0'] = 1, ['1'] = 1, ['2'] = 1, ['3'] = 1, ['4'] = 1, ['5'] = 1, ['6'] = 1, ['7'] = 1,
+    ['8'] = 1, ['9'] = 1,
+
+    ['-'] = 1,
 };
 
 struct String {
@@ -374,7 +394,7 @@ static size_t entities_to_utf8(const unsigned char *input, size_t input_length, 
     size_t i = 0, k;
     const unsigned char *original_output = output;
     for (i = 0; i < input_length; ++i) {
-        if (skip_stray_tags && input[i] == '<') { // Skipping stray tags
+        if (skip_stray_tags && input[i] == '<' && i + 1 < input_length && input[i + 1] == '/') {
             do {
                 i += 1;
             } while (i < input_length && input[i] != '>');
@@ -490,6 +510,25 @@ static size_t entities_to_utf8(const unsigned char *input, size_t input_length, 
     return output - original_output;
 }
 
+static struct String entities_to_utf8_malloc(const char *input, size_t length, bool skip_stray_tags)
+{
+    if (length == 0) {
+        return (struct String) {"", 0, false};
+    }
+    unsigned char *buffer = malloc(length);
+    if (buffer == NULL) {
+        return NULL_STRING;
+    }
+    size_t buffer_length = entities_to_utf8(input, length, buffer, skip_stray_tags);
+    unsigned char *buffer_realloc = realloc(buffer, buffer_length);
+    if (buffer_realloc == NULL) {
+        free(buffer);
+        return NULL_STRING;
+    }
+    return (struct String) {buffer_realloc, buffer_length, true};
+
+}
+
 void string_free(struct String string)
 {
     if (string.is_malloced && string.data != NULL) {
@@ -524,38 +563,45 @@ static int strnicmp(const char *s1, const char *s2, size_t length)
 /*****************************************************************************/
 
 struct HtmlDocument {
+    // Used to store decoded values in the selector filter. This enables to avoid `malloc` calls in
+    // `Selector_filter`, which has no big effect on performance, but rather serves to avoid the
+    // need for error handling. Otherwise we would need to check for errors after *every* selector
+    // iteration.
+    // However, get_name, get_attribute also use malloc. Alternatively, on error we could set a
+    // has_malloc_error flag; if set, the whole extraction result shall be discarded.
+
+    // Struct alignment & performance: There is a trade-off between cache locality and having
+    // members aligned to the word size. Accessing non-aligned struct members is slower. In the
+    // attributes array, cache locality is less relevant than in the nodes array.
+
     const unsigned char *html;
+    unsigned int node_count;
     struct Node {
-        union {
-            const unsigned char *name_start;
-            const unsigned char *value_start;
-        };
-        union {
-            unsigned int name_length;
-            unsigned int value_length;
-        };
-        unsigned int attributes_start;
+        const unsigned char *content; // Contains element name or text node content
+        unsigned int content_length;
+        unsigned int attributes;
         unsigned short nesting_level;
         unsigned short attributes_count;
         enum NodeType {
             NODE_TYPE_DOCUMENT,
             NODE_TYPE_COMMENT,
-            NODE_TYPE_VOID_ELEMENT,
             NODE_TYPE_UNCLOSED_ELEMENT,
-            NODE_TYPE_NONVOID_ELEMENT,
             NODE_TYPE_DOCTYPE,
             NODE_TYPE_TEXT,
             NODE_TYPE_CDATA,
+            NODE_TYPE_VOID_ELEMENT,
+            NODE_TYPE_NONVOID_ELEMENT,
         } type;
     } *nodes;
     struct Attribute {
-        const unsigned char *name_start;
-        const unsigned char *value_start;
-        unsigned short name_length;
-        unsigned short value_length;
+        const unsigned char *name;
+        const unsigned char *value;
+        size_t name_length;
+        size_t value_length;
     } *attributes;
-    unsigned int node_count;
     size_t html_strlen;
+    unsigned char *largest_value_buffer;
+    bool has_malloc_error;
 };
 
 static const int POSITION_NOT_STARTED = -1;
@@ -598,6 +644,7 @@ struct Selector {
             struct {
                 const void *arg1;
                 const void *arg2;
+                size_t arg1_strlen; // Provides a performance boost
             } filter_data;
         };
         enum SelectorItemType type;
@@ -617,7 +664,7 @@ static bool parse_attribute(struct Attribute *attribute, const unsigned char **h
         *html_ptr = html;
         return false;
     }
-    attribute->name_start = html;
+    attribute->name = html;
     attribute->name_length = 0;
     attribute->value_length = 0;
     do {
@@ -628,7 +675,7 @@ static bool parse_attribute(struct Attribute *attribute, const unsigned char **h
         html += 1;
     }
     if (*html != '=') {
-        attribute->value_start = html;
+        attribute->value = html;
         *html_ptr = html;
         return true;
     }
@@ -638,7 +685,7 @@ static bool parse_attribute(struct Attribute *attribute, const unsigned char **h
     if (*html == '"' || *html == '\'') {
         char quot = *html;
         html += 1;
-        attribute->value_start = html;
+        attribute->value = html;
         while (*html != '\0' && *html != quot) {
             attribute->value_length += 1;
             html += 1;
@@ -648,11 +695,11 @@ static bool parse_attribute(struct Attribute *attribute, const unsigned char **h
         }
     }
     else {
-        attribute->value_start = html;
-        do {
+        attribute->value = html;
+        while (CHARMASK_ATTRIBUTE_VALUE_END[*html] == 0) {
             attribute->value_length += 1;
             html += 1;
-        } while (CHARMASK_ATTRIBUTE_VALUE_END[*html] == 0);
+        }
     }
     while (CHARMASK_WHITESPACE[*html]) {
         html += 1;
@@ -670,42 +717,50 @@ struct String HtmlDocument_extract_charset(const unsigned char *html)
         if (*html == '\0') {
             break;
         }
-        if (!strncmp(html, "<!--", 4)) {
-            html += 4;
-            while (
-                *html != '\0' &&
-                (*html != '-' || html[1] != '-' || html[2] != '>')
-            ) {
-                html += 1;
+        if (html[0] == '<' && html[1] == '!') {
+            if (html[2] == '-' && html[3] == '-') {
+                html += 4;
+                while (
+                    *html != '\0' &&
+                    (*html != '-' || html[1] != '-' || html[2] != '>')
+                ) {
+                    html += 1;
+                }
             }
-            if (html - html_start > 1024 || *html == '\0') {
+            else {
+                html += 2;
+                while (*html != '>' && *html != '\0') {
+                    html += 1;
+                }
+            }
+            if (html - html > 1024 || *html == '\0') {
                 break;
             }
         }
         if (*html == '<') {
             html += 1;
-            const char *name_start = html;
+            const char *name = html;
             int name_length = 0;
-            while (CHARMASK_TAG_NAME_END[html[name_length]] == 0) {
+            while (CHARMASK_VALID_TAG_NAME[html[name_length]] == 0) {
                 name_length += 1;
             }
-            if (!CHARSEQICMP(name_start, name_length, "script") ||
-                !CHARSEQICMP(name_start, name_length, "style") ||
-                !CHARSEQICMP(name_start, name_length, "title") ||
-                !CHARSEQICMP(name_start, name_length, "textarea"))
+            if (!CHARSEQICMP(name, name_length, "script") ||
+                !CHARSEQICMP(name, name_length, "style") ||
+                !CHARSEQICMP(name, name_length, "title") ||
+                !CHARSEQICMP(name, name_length, "textarea"))
             {
                 html += name_length;
                 do {
                     html += 1;
                 } while (
                     *html != '\0' && (*html != '<' || *(html + 1) != '/' ||
-                    strnicmp(&html[2], name_start, name_length))
+                    strnicmp(&html[2], name, name_length))
                 );
             }
         }
         if (!strnicmp(html, "<meta", sizeof "<meta" - 1)) {
             html += 1;
-            if (html - html_start > 1024) {
+            if (html - html > 1024) {
                 break;
             }
             continue;
@@ -716,33 +771,21 @@ struct String HtmlDocument_extract_charset(const unsigned char *html)
         size_t content_length;
         struct Attribute attr;
         while (parse_attribute(&attr, &html)) {
-            if (!strnicmp(attr.name_start, "charset", attr.name_length)) {
-                unsigned char *buffer = malloc(attr.value_length);
-                if (buffer == NULL) {
-                    return NULL_STRING;
-                }
-                size_t buffer_length = entities_to_utf8(attr.value_start, attr.value_length, buffer, false);
-                unsigned char *buffer_realloc = realloc(buffer, buffer_length);
-                if (buffer_realloc == NULL) {
-                    free(buffer);
-                    return NULL_STRING;
-                }
-                return (struct String) {buffer_realloc, buffer_length, true};
+            if (!strnicmp(attr.name, "charset", attr.name_length)) {
+                return entities_to_utf8_malloc(attr.value, attr.value_length, false);
             }
-            if (!strnicmp(attr.name_start, "content", attr.name_length)) {
-                content = (unsigned char *) attr.value_start;
+            if (!strnicmp(attr.name, "content", attr.name_length)) {
+                content = (unsigned char *) attr.value;
                 content_length = attr.value_length;
             }
-            else if (!strnicmp(attr.name_start, "http-equiv", attr.name_length)) {
-                unsigned char *buffer = malloc(attr.value_length);
-                if (buffer == NULL) {
-                    return NULL_STRING;
-                }
-                size_t buffer_length = entities_to_utf8(attr.value_start, attr.value_length, buffer, false);
-                if (!strnicmp(buffer, "content-type", buffer_length)) {
+            else if (!strnicmp(attr.name, "http-equiv", attr.name_length)) {
+                struct String buffer = entities_to_utf8_malloc(
+                    attr.value, attr.value_length, false
+                );
+                if (!strnicmp(buffer.data, "content-type", buffer.length)) {
                     has_http_equiv_content_type = true;
                 }
-                free(buffer);
+                string_free(buffer);
             }
         }
         if (has_http_equiv_content_type && content != NULL) {
@@ -810,6 +853,9 @@ void HtmlDocument_free(struct HtmlDocument *doc)
     if (doc->attributes != NULL) {
         free(doc->attributes);
     }
+    if (doc->largest_value_buffer != NULL) {
+        free(doc->largest_value_buffer);
+    }
     free(doc->nodes);
     free(doc);
 }
@@ -821,7 +867,7 @@ static struct HtmlDocument * HtmlDocument(const unsigned char *html, size_t html
     // `*_capacity` must be greater than zero to avoid invalid memory write operations.
 
     size_t nodes_capacity = 100 + html_strlen / 40;
-    size_t attributes_capacity = 100 + nodes_capacity * 2.4;
+    size_t attributes_capacity = 100 + nodes_capacity * 2;
 
     struct HtmlDocument *doc = malloc(sizeof (struct HtmlDocument));
     if (doc == NULL) {
@@ -841,8 +887,8 @@ static struct HtmlDocument * HtmlDocument(const unsigned char *html, size_t html
     }
 
     // We cannot use `struct Node *` pointers because `realloc` may break them
-    int unclosed_elements_size = 0;
-    int unclosed_elements_capacity = 100;
+    unsigned short unclosed_elements_size = 0;
+    unsigned short unclosed_elements_capacity = 100;
     int *unclosed_elements = malloc(unclosed_elements_capacity * sizeof *unclosed_elements);
     if (unclosed_elements == NULL) {
         free(doc->nodes);
@@ -863,14 +909,16 @@ static struct HtmlDocument * HtmlDocument(const unsigned char *html, size_t html
         }
 
     doc->nodes[0] = (struct Node) {
-        .name_start = "#document",
-        .name_length = sizeof "#document" - 1,
+        .content = "#document",
+        .content_length = sizeof "#document" - 1,
         .attributes_count = 0,
         .type = NODE_TYPE_DOCUMENT
     };
     doc->node_count = 1;
     doc->html = html;
     doc->html_strlen = html_strlen;
+    doc->largest_value_buffer = NULL;
+    doc->has_malloc_error = false;
 
     int attributes_count = 0;
     int html_node = -1, head_node = -1, body_node = -1, tbody_node = -2, colgroup_node = -1;
@@ -891,44 +939,74 @@ static struct HtmlDocument * HtmlDocument(const unsigned char *html, size_t html
             doc->nodes = new_nodes; \
         }
 
+    size_t largest_value_length = 0;
     while (true) {
+        int text_node_length = 0;
+        bool has_only_whitespace = true;
         if (*html == '<') {
-            html += 1;
-            if (html[0] == '!' && html[1] == '-' && html[2] == '-') {
-                html += 3;
-                const unsigned char *comment_start = html;
-                while (html[0] != '\0' && (html[0] != '-' || html[1] != '-' || html[2] != '>')) {
-                    html += 1;
+            if (html[1] == '!') {
+                const unsigned char *comment;
+                size_t comment_length;
+                if (html[2] == '-' && html[3] == '-') {
+                    html += 4;
+                    comment = html;
+                    while (html[0] != '\0' && (html[0] != '-' || html[1] != '-' || html[2] != '>')) {
+                        html += 1;
+                    }
+                    comment_length = html - comment;
+                    html += 3 * (*html != '\0');
+                }
+                else { // Parser error: `incorrectly-opened-comment`
+                    html += 2;
+                    comment = html;
+                    while (*html != '>' && *html != '\0') {
+                        html += 1;
+                    }
+                    comment_length = html - comment;
+                    html += (*html != '\0');
                 }
                 doc->nodes[doc->node_count] = (struct Node) {
-                    .name_start = comment_start,
-                    .name_length = html - comment_start,
+                    .content = comment,
+                    .content_length = comment_length,
                     .type = NODE_TYPE_COMMENT,
                     .nesting_level = 1,
                 };
                 INCREMENT_NODE_COUNT();
-                if (*html != '\0') {
-                    html += 3;
-                }
             }
-            else if (*html == '/') { // Closing tag
-                html += 1;
+            else if (html[1] == '/') {
+                html += 2;
+                if (!CHARMASK_VALID_TAG_NAME_START[*html]) {
+                    // Handling `invalid-first-character-of-tag-name` of the W3C standard
+                    const unsigned char *comment = html;
+                    while (*html != '>' && *html != '\0') {
+                        html += 1;
+                    }
+                    doc->nodes[doc->node_count] = (struct Node) {
+                        .content = comment,
+                        .content_length = html - comment,
+                        .type = NODE_TYPE_COMMENT,
+                        .nesting_level = 1,
+                    };
+                    INCREMENT_NODE_COUNT();
+                    html += (*html != '\0');
+                    continue;
+                }
                 int name_length = 0;
-                while (CHARMASK_TAG_NAME_END[html[name_length]] == 0) {
+                while (CHARMASK_VALID_TAG_NAME[html[name_length]]) {
                     name_length += 1;
                 }
 
-                bool has_found_start_node = false;
+                bool has_found_node = false;
                 struct Node *node;
                 int k;
                 for (k = unclosed_elements_size - 1; k >= 0; --k) {
                     node = &doc->nodes[unclosed_elements[k]];
-                    if (name_length == node->name_length && !strnicmp(node->name_start, html, name_length)) {
-                        has_found_start_node = true;
+                    if (name_length == node->content_length && !strnicmp(node->content, html, name_length)) {
+                        has_found_node = true;
                         break;
                     }
                 }
-                if (has_found_start_node) {
+                if (has_found_node) {
                     // Here we close all unclosed nodes between the matching start node and the last node.
                     // Example:
                     // <a>
@@ -937,6 +1015,7 @@ static struct HtmlDocument * HtmlDocument(const unsigned char *html, size_t html
                     // <c>  ← indent_width = 2
                     // </a>
                     int indent_width = unclosed_elements_size - k;
+                    bool b;
                     for (int node_index = doc->node_count - 1; node_index >= unclosed_elements[k]; --node_index) {
                         if (node_index == unclosed_elements[unclosed_elements_size - 1]) {
                             unclosed_elements_size -= 1;
@@ -950,10 +1029,8 @@ static struct HtmlDocument * HtmlDocument(const unsigned char *html, size_t html
                 while (*html != '>' && *html != '\0') {
                     html += 1;
                 }
-                if (*html == '>') {
-                    html += 1;  // Skipping over `>`
-                }
-                if (has_found_start_node || *html == '\0') {
+                html += (*html != '\0');
+                if (has_found_node || *html == '\0') {
                     continue;
                 }
 
@@ -968,21 +1045,25 @@ static struct HtmlDocument * HtmlDocument(const unsigned char *html, size_t html
                 while (*html != '<' && *html != '\0') {
                     html += 1;
                 }
-                node->value_length = html - node->value_start;
+                node->content_length = html - node->content;
             }
-            else {
+            else if (CHARMASK_VALID_TAG_NAME_START[html[1]]) {
                 // Here we analyse a start tag. We use a loop to add nodes because we may need
                 // to consider one or multiple optional start tags that are not encoded.
 
+                html += 1;
                 const char *name = html;
-                int name_length = 0;
-                int new_attributes_count = attributes_count;
+                unsigned short name_length = 0;
+                unsigned int new_attributes_count = attributes_count;
 
-                while (CHARMASK_TAG_NAME_END[html[name_length]] == 0) {
+                while (CHARMASK_VALID_TAG_NAME[html[name_length]]) {
                     name_length += 1;
                 }
                 html += name_length;
                 while (parse_attribute(&doc->attributes[new_attributes_count], &html)) {
+                    if (doc->attributes[new_attributes_count].value_length > largest_value_length) {
+                        largest_value_length = doc->attributes[new_attributes_count].value_length;
+                    }
                     if (++new_attributes_count == attributes_capacity) {
                         attributes_capacity *= 1.2;
                         struct Attribute *new_attributes = realloc(
@@ -996,9 +1077,7 @@ static struct HtmlDocument * HtmlDocument(const unsigned char *html, size_t html
                         doc->attributes = new_attributes;
                     }
                 }
-                if (*html == '/') {
-                    html += 1;
-                }
+                html += (*html == '/');
                 html += 1;  // Skipping over `>`
 
                 bool break_after_adding_node = false;
@@ -1010,7 +1089,7 @@ static struct HtmlDocument * HtmlDocument(const unsigned char *html, size_t html
                     }
                     else if (!CHARSEQICMP(name, name_length, "html")) {
                         if (html_node != -1) {
-                            added_node.name_start = NULL;
+                            added_node.content = NULL;
                             node_for_attributes = &doc->nodes[html_node];
                         }
                         else {
@@ -1026,7 +1105,7 @@ static struct HtmlDocument * HtmlDocument(const unsigned char *html, size_t html
                     }
                     else if (!CHARSEQICMP(name, name_length, "head")) {
                         if (head_node != -1) {
-                            added_node.name_start = NULL;
+                            added_node.content = NULL;
                             node_for_attributes = &doc->nodes[head_node];
                         }
                         else {
@@ -1042,7 +1121,7 @@ static struct HtmlDocument * HtmlDocument(const unsigned char *html, size_t html
                     }
                     else if (!CHARSEQICMP(name, name_length, "body")) {
                         if (body_node != -1) {
-                            added_node.name_start = NULL;
+                            added_node.content = NULL;
                             node_for_attributes = &doc->nodes[body_node];
                         }
                         else {
@@ -1097,7 +1176,7 @@ static struct HtmlDocument * HtmlDocument(const unsigned char *html, size_t html
                     /*****************************************************************************/
 
                     if (node_for_attributes != NULL) {
-                        node_for_attributes->attributes_start = attributes_count;
+                        node_for_attributes->attributes = attributes_count;
                         node_for_attributes->attributes_count = new_attributes_count - attributes_count;
                         attributes_count = new_attributes_count;
                     }
@@ -1105,7 +1184,7 @@ static struct HtmlDocument * HtmlDocument(const unsigned char *html, size_t html
                         added_node.attributes_count = 0;
                     }
 
-                    if (added_node.name_start == NULL) {
+                    if (added_node.content == NULL) {
                         break;
                     }
 
@@ -1118,19 +1197,19 @@ static struct HtmlDocument * HtmlDocument(const unsigned char *html, size_t html
                     // Void elements
                     // https://html.spec.whatwg.org/multipage/syntax.html#void-elements
 
-                    if (!CHARSEQICMP(added_node.name_start, added_node.name_length, "br") ||
-                        !CHARSEQICMP(added_node.name_start, added_node.name_length, "img") ||
-                        !CHARSEQICMP(added_node.name_start, added_node.name_length, "meta") ||
-                        !CHARSEQICMP(added_node.name_start, added_node.name_length, "link") ||
-                        !CHARSEQICMP(added_node.name_start, added_node.name_length, "input") ||
-                        !CHARSEQICMP(added_node.name_start, added_node.name_length, "embed") ||
-                        !CHARSEQICMP(added_node.name_start, added_node.name_length, "base") ||
-                        !CHARSEQICMP(added_node.name_start, added_node.name_length, "hr") ||
-                        !CHARSEQICMP(added_node.name_start, added_node.name_length, "col") ||
-                        !CHARSEQICMP(added_node.name_start, added_node.name_length, "area") ||
-                        !CHARSEQICMP(added_node.name_start, added_node.name_length, "wbr") ||
-                        !CHARSEQICMP(added_node.name_start, added_node.name_length, "source") ||
-                        !CHARSEQICMP(added_node.name_start, added_node.name_length, "track"))
+                    if (!CHARSEQICMP(added_node.content, added_node.content_length, "br") ||
+                        !CHARSEQICMP(added_node.content, added_node.content_length, "img") ||
+                        !CHARSEQICMP(added_node.content, added_node.content_length, "meta") ||
+                        !CHARSEQICMP(added_node.content, added_node.content_length, "link") ||
+                        !CHARSEQICMP(added_node.content, added_node.content_length, "input") ||
+                        !CHARSEQICMP(added_node.content, added_node.content_length, "embed") ||
+                        !CHARSEQICMP(added_node.content, added_node.content_length, "base") ||
+                        !CHARSEQICMP(added_node.content, added_node.content_length, "hr") ||
+                        !CHARSEQICMP(added_node.content, added_node.content_length, "col") ||
+                        !CHARSEQICMP(added_node.content, added_node.content_length, "area") ||
+                        !CHARSEQICMP(added_node.content, added_node.content_length, "wbr") ||
+                        !CHARSEQICMP(added_node.content, added_node.content_length, "source") ||
+                        !CHARSEQICMP(added_node.content, added_node.content_length, "track"))
                     {
                         added_node.type = NODE_TYPE_VOID_ELEMENT;
                     }
@@ -1141,103 +1220,103 @@ static struct HtmlDocument * HtmlDocument(const unsigned char *html, size_t html
                     struct Node *node = &doc->nodes[unclosed_elements[unclosed_elements_size - 1]];
 
                     if (
-                        !CHARSEQICMP(added_node.name_start, added_node.name_length, "body") &&
-                        !CHARSEQICMP(node->name_start, node->name_length, "head") ||
+                        !CHARSEQICMP(added_node.content, added_node.content_length, "body") &&
+                        !CHARSEQICMP(node->content, node->content_length, "head") ||
 
-                        !CHARSEQICMP(added_node.name_start, added_node.name_length, "li") &&
-                        !CHARSEQICMP(node->name_start, node->name_length, "li") ||
+                        !CHARSEQICMP(added_node.content, added_node.content_length, "li") &&
+                        !CHARSEQICMP(node->content, node->content_length, "li") ||
 
-                        !CHARSEQICMP(added_node.name_start, added_node.name_length, "option") &&
-                        !CHARSEQICMP(node->name_start, node->name_length, "option") ||
+                        !CHARSEQICMP(added_node.content, added_node.content_length, "option") &&
+                        !CHARSEQICMP(node->content, node->content_length, "option") ||
 
-                        !CHARSEQICMP(added_node.name_start, added_node.name_length, "thead") &&
-                        !CHARSEQICMP(node->name_start, node->name_length, "colgroup") ||
+                        !CHARSEQICMP(added_node.content, added_node.content_length, "thead") &&
+                        !CHARSEQICMP(node->content, node->content_length, "colgroup") ||
 
-                        !CHARSEQICMP(added_node.name_start, added_node.name_length, "thead") &&
-                        !CHARSEQICMP(node->name_start, node->name_length, "colgroup") ||
+                        !CHARSEQICMP(added_node.content, added_node.content_length, "thead") &&
+                        !CHARSEQICMP(node->content, node->content_length, "colgroup") ||
 
-                        !CHARSEQICMP(added_node.name_start, added_node.name_length, "tbody") &&
+                        !CHARSEQICMP(added_node.content, added_node.content_length, "tbody") &&
                         (
-                            !CHARSEQICMP(node->name_start, node->name_length, "colgroup") ||
-                            !CHARSEQICMP(node->name_start, node->name_length, "thead")
+                            !CHARSEQICMP(node->content, node->content_length, "colgroup") ||
+                            !CHARSEQICMP(node->content, node->content_length, "thead")
                         ) ||
 
-                        !CHARSEQICMP(added_node.name_start, added_node.name_length, "tfoot") &&
+                        !CHARSEQICMP(added_node.content, added_node.content_length, "tfoot") &&
                         (
-                            !CHARSEQICMP(node->name_start, node->name_length, "colgroup") ||
-                            !CHARSEQICMP(node->name_start, node->name_length, "thead") ||
-                            !CHARSEQICMP(node->name_start, node->name_length, "tbody")
+                            !CHARSEQICMP(node->content, node->content_length, "colgroup") ||
+                            !CHARSEQICMP(node->content, node->content_length, "thead") ||
+                            !CHARSEQICMP(node->content, node->content_length, "tbody")
                         ) ||
 
                         (
-                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "td") ||
-                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "th")
+                            !CHARSEQICMP(added_node.content, added_node.content_length, "td") ||
+                            !CHARSEQICMP(added_node.content, added_node.content_length, "th")
                         ) &&
                         (
-                            !CHARSEQICMP(node->name_start, node->name_length, "td") ||
-                            !CHARSEQICMP(node->name_start, node->name_length, "th")
+                            !CHARSEQICMP(node->content, node->content_length, "td") ||
+                            !CHARSEQICMP(node->content, node->content_length, "th")
                         ) ||
 
                         (
-                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "dt") ||
-                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "dd")
+                            !CHARSEQICMP(added_node.content, added_node.content_length, "dt") ||
+                            !CHARSEQICMP(added_node.content, added_node.content_length, "dd")
                         ) &&
                         (
-                            !CHARSEQICMP(node->name_start, node->name_length, "dt") ||
-                            !CHARSEQICMP(node->name_start, node->name_length, "dd")
+                            !CHARSEQICMP(node->content, node->content_length, "dt") ||
+                            !CHARSEQICMP(node->content, node->content_length, "dd")
                         ) ||
 
                         (
-                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "rt") ||
-                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "rp")
+                            !CHARSEQICMP(added_node.content, added_node.content_length, "rt") ||
+                            !CHARSEQICMP(added_node.content, added_node.content_length, "rp")
                         ) &&
                         (
-                            !CHARSEQICMP(node->name_start, node->name_length, "rt") ||
-                            !CHARSEQICMP(node->name_start, node->name_length, "rp")
+                            !CHARSEQICMP(node->content, node->content_length, "rt") ||
+                            !CHARSEQICMP(node->content, node->content_length, "rp")
                         ) ||
 
                         (
-                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "optgroup") ||
-                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "hr")
+                            !CHARSEQICMP(added_node.content, added_node.content_length, "optgroup") ||
+                            !CHARSEQICMP(added_node.content, added_node.content_length, "hr")
                         ) &&
                         (
-                            !CHARSEQICMP(node->name_start, node->name_length, "optgroup") ||
-                            !CHARSEQICMP(node->name_start, node->name_length, "option")
+                            !CHARSEQICMP(node->content, node->content_length, "optgroup") ||
+                            !CHARSEQICMP(node->content, node->content_length, "option")
                         ) ||
 
-                        !CHARSEQICMP(node->name_start, node->name_length, "p") &&
+                        !CHARSEQICMP(node->content, node->content_length, "p") &&
                         (
-                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "address") ||
-                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "article") ||
-                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "aside") ||
-                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "blockquote") ||
-                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "details") ||
-                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "div") ||
-                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "dl") ||
-                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "fieldset") ||
-                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "figcaption") ||
-                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "figure") ||
-                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "footer") ||
-                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "form") ||
-                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "h1") ||
-                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "h2") ||
-                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "h3") ||
-                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "h4") ||
-                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "h5") ||
-                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "h6") ||
-                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "header") ||
-                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "hgroup") ||
-                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "hr") ||
-                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "main") ||
-                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "menu") ||
-                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "nav") ||
-                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "ol") ||
-                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "p") ||
-                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "pre") ||
-                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "search") ||
-                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "section") ||
-                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "table") ||
-                            !CHARSEQICMP(added_node.name_start, added_node.name_length, "ul")
+                            !CHARSEQICMP(added_node.content, added_node.content_length, "address") ||
+                            !CHARSEQICMP(added_node.content, added_node.content_length, "article") ||
+                            !CHARSEQICMP(added_node.content, added_node.content_length, "aside") ||
+                            !CHARSEQICMP(added_node.content, added_node.content_length, "blockquote") ||
+                            !CHARSEQICMP(added_node.content, added_node.content_length, "details") ||
+                            !CHARSEQICMP(added_node.content, added_node.content_length, "div") ||
+                            !CHARSEQICMP(added_node.content, added_node.content_length, "dl") ||
+                            !CHARSEQICMP(added_node.content, added_node.content_length, "fieldset") ||
+                            !CHARSEQICMP(added_node.content, added_node.content_length, "figcaption") ||
+                            !CHARSEQICMP(added_node.content, added_node.content_length, "figure") ||
+                            !CHARSEQICMP(added_node.content, added_node.content_length, "footer") ||
+                            !CHARSEQICMP(added_node.content, added_node.content_length, "form") ||
+                            !CHARSEQICMP(added_node.content, added_node.content_length, "h1") ||
+                            !CHARSEQICMP(added_node.content, added_node.content_length, "h2") ||
+                            !CHARSEQICMP(added_node.content, added_node.content_length, "h3") ||
+                            !CHARSEQICMP(added_node.content, added_node.content_length, "h4") ||
+                            !CHARSEQICMP(added_node.content, added_node.content_length, "h5") ||
+                            !CHARSEQICMP(added_node.content, added_node.content_length, "h6") ||
+                            !CHARSEQICMP(added_node.content, added_node.content_length, "header") ||
+                            !CHARSEQICMP(added_node.content, added_node.content_length, "hgroup") ||
+                            !CHARSEQICMP(added_node.content, added_node.content_length, "hr") ||
+                            !CHARSEQICMP(added_node.content, added_node.content_length, "main") ||
+                            !CHARSEQICMP(added_node.content, added_node.content_length, "menu") ||
+                            !CHARSEQICMP(added_node.content, added_node.content_length, "nav") ||
+                            !CHARSEQICMP(added_node.content, added_node.content_length, "ol") ||
+                            !CHARSEQICMP(added_node.content, added_node.content_length, "p") ||
+                            !CHARSEQICMP(added_node.content, added_node.content_length, "pre") ||
+                            !CHARSEQICMP(added_node.content, added_node.content_length, "search") ||
+                            !CHARSEQICMP(added_node.content, added_node.content_length, "section") ||
+                            !CHARSEQICMP(added_node.content, added_node.content_length, "table") ||
+                            !CHARSEQICMP(added_node.content, added_node.content_length, "ul")
                         )
                     ) {
                         node->type = NODE_TYPE_NONVOID_ELEMENT;
@@ -1257,26 +1336,30 @@ static struct HtmlDocument * HtmlDocument(const unsigned char *html, size_t html
                     INCREMENT_NODE_COUNT();
                 } while (!break_after_adding_node);
             }
+            else {
+                // This will cause the `<` character to be added to a text node
+                text_node_length = 1;
+                has_only_whitespace = false;
+            }
         }
         if (*html == '\0') {
             break;
         }
 
-        int text_node_length = 0;
-        bool has_only_whitespace = true;
         enum NodeType type = NODE_TYPE_TEXT;
 
         struct Node *node = &doc->nodes[doc->node_count - 1];
-        if (!CHARSEQICMP(node->name_start, node->name_length, "script") ||
-            !CHARSEQICMP(node->name_start, node->name_length, "style") ||
-            !CHARSEQICMP(node->name_start, node->name_length, "title") ||
-            !CHARSEQICMP(node->name_start, node->name_length, "textarea"))
+        if (node->type == NODE_TYPE_UNCLOSED_ELEMENT &&
+            (!CHARSEQICMP(node->content, node->content_length, "script") ||
+            !CHARSEQICMP(node->content, node->content_length, "style") ||
+            !CHARSEQICMP(node->content, node->content_length, "title") ||
+            !CHARSEQICMP(node->content, node->content_length, "textarea")))
         {
             type = NODE_TYPE_CDATA;
             while (
                 html[text_node_length] != '\0' &&
                 (html[text_node_length] != '<' || html[text_node_length + 1] != '/' ||
-                strnicmp(&html[text_node_length + 2], node->name_start, node->name_length))
+                strnicmp(&html[text_node_length + 2], node->content, node->content_length))
             ) {
                 text_node_length += 1;
             }
@@ -1296,8 +1379,8 @@ static struct HtmlDocument * HtmlDocument(const unsigned char *html, size_t html
         if (type == NODE_TYPE_TEXT && !has_only_whitespace && body_node == -1) {
             if (html_node == -1) {
                 doc->nodes[doc->node_count] = (struct Node) {
-                    .name_start = "html",
-                    .name_length = sizeof "html" - 1,
+                    .content = "html",
+                    .content_length = sizeof "html" - 1,
                     .type = NODE_TYPE_UNCLOSED_ELEMENT,
                     .nesting_level = 1,
                 };
@@ -1306,15 +1389,17 @@ static struct HtmlDocument * HtmlDocument(const unsigned char *html, size_t html
                 unclosed_elements[unclosed_elements_size] = html_node;
                 INCREMENT_UNCLOSED_ELEMENTS_SIZE();
             }
-            doc->nodes[doc->node_count] = (struct Node) {
-                .name_start = "body",
-                .name_length = sizeof "body" - 1,
-                .type = NODE_TYPE_UNCLOSED_ELEMENT,
-                .nesting_level = 1,
-            };
-            body_node = doc->node_count;
-            INCREMENT_NODE_COUNT();
-            if (head_node != -1) {
+            if (head_node == -1) {
+                doc->nodes[doc->node_count] = (struct Node) {
+                    .content = "head",
+                    .content_length = sizeof "head" - 1,
+                    .type = NODE_TYPE_NONVOID_ELEMENT,
+                    .nesting_level = 1,
+                };
+                head_node = doc->node_count;
+                INCREMENT_NODE_COUNT();
+            }
+            else {
                 doc->nodes[head_node].type = NODE_TYPE_NONVOID_ELEMENT;
                 for (int i = head_node + 1; i < doc->node_count - 1; ++i) {
                     doc->nodes[i].nesting_level += 1;
@@ -1324,14 +1409,22 @@ static struct HtmlDocument * HtmlDocument(const unsigned char *html, size_t html
                 }
                 unclosed_elements_size -= 1;
             }
+            doc->nodes[doc->node_count] = (struct Node) {
+                .content = "body",
+                .content_length = sizeof "body" - 1,
+                .type = NODE_TYPE_UNCLOSED_ELEMENT,
+                .nesting_level = 1,
+            };
+            body_node = doc->node_count;
+            INCREMENT_NODE_COUNT();
             unclosed_elements[unclosed_elements_size] = body_node;
             INCREMENT_UNCLOSED_ELEMENTS_SIZE();
         }
         if (type == NODE_TYPE_CDATA || !has_only_whitespace || body_node != -1) {
             doc->nodes[doc->node_count] = (struct Node) {
                 .type = type,
-                .value_start = html,
-                .value_length = text_node_length,
+                .content = html,
+                .content_length = text_node_length,
                 .nesting_level = 1,
             };
             INCREMENT_NODE_COUNT();
@@ -1351,7 +1444,10 @@ static struct HtmlDocument * HtmlDocument(const unsigned char *html, size_t html
         node -= 1;
     }
 
-    // Next we realloc the data structures
+    // We don't reallocate the data structures to smaller sizes (max. saving ~ 20%) because it can
+    // cost a lot of performance. It would be very unsual to have many `HtmlDocument` structures
+    // allocated at the same time and the memory consumption in general isn't that high - we need
+    // only additional 3 MB to store the nodes and attributes of a huge 1.3 MB big test document.
 
     free(unclosed_elements);
 
@@ -1359,25 +1455,321 @@ static struct HtmlDocument * HtmlDocument(const unsigned char *html, size_t html
         free(doc->attributes);
         doc->attributes = NULL;
     }
-    else {
-        struct Attribute *new_attributes = realloc(
-            doc->attributes, attributes_count * sizeof *doc->attributes
-        );
-        if (new_attributes == NULL) {
-            HtmlDocument_free(doc);
-            return NULL;
-        }
-        doc->attributes = new_attributes;
-    }
 
-    struct Node *new_nodes = realloc(doc->nodes, doc->node_count * sizeof *doc->nodes);
-    if (new_nodes == NULL) {
+    doc->largest_value_buffer = malloc(largest_value_length);
+    if (doc->largest_value_buffer == NULL) {
         HtmlDocument_free(doc);
         return NULL;
     }
-    doc->nodes = new_nodes;
 
     return doc;
+}
+
+struct String HtmlDocument_get_name(struct HtmlDocument *doc, int node)
+{
+    if (node < 0 || node >= doc->node_count) {
+        return NULL_STRING;
+    }
+    if (doc->nodes[node].type == NODE_TYPE_TEXT || doc->nodes[node].type == NODE_TYPE_CDATA) {
+        return (struct String) {"#text", sizeof "#text" - 1, false};
+    }
+    if (doc->nodes[node].type == NODE_TYPE_COMMENT) {
+        return (struct String) {"#comment", sizeof "#comment" - 1, false};
+    }
+    char *name = malloc(doc->nodes[node].content_length);
+    if (name == NULL) {
+        doc->has_malloc_error = true;
+        return NULL_STRING;
+    }
+    for (int i = 0; i < doc->nodes[node].content_length; ++i) {
+        name[i] = tolower(doc->nodes[node].content[i]);
+    }
+    return (struct String) {name, doc->nodes[node].content_length, true};
+}
+
+struct String HtmlDocument_get_value(struct HtmlDocument *doc, int node)
+{
+    if (node < 0 || node >= doc->node_count) {
+        return NULL_STRING;
+    }
+    struct Node *n = &doc->nodes[node];
+    if (n->type == NODE_TYPE_CDATA || n->type == NODE_TYPE_COMMENT) {
+        return (struct String) {(unsigned char *) n->content, n->content_length, false};
+    }
+    if (n->type == NODE_TYPE_TEXT) {
+        struct String result = entities_to_utf8_malloc(n->content, n->content_length, true);
+        if (result.data == NULL) {
+            doc->has_malloc_error = true;
+        }
+        return result;
+    }
+    return NULL_STRING;
+}
+
+struct String HtmlDocument_get_attribute(struct HtmlDocument *doc, int node, const char *attribute)
+{
+    if (node < 0 || node >= doc->node_count) {
+        return NULL_STRING;
+    }
+    size_t strlen_attribute = strlen(attribute);
+    struct Attribute *attributes = &doc->attributes[doc->nodes[node].attributes];
+    for (int i = 0; i < doc->nodes[node].attributes_count; ++i) {
+        if (attributes[i].name_length == strlen_attribute &&
+            !strnicmp(attributes[i].name, attribute, attributes[i].name_length))
+        {
+            struct String result =
+                entities_to_utf8_malloc(attributes[i].value, attributes[i].value_length, false);
+            if (result.data == NULL) {
+                doc->has_malloc_error = true;
+            }
+            return result;
+        }
+    }
+    return NULL_STRING;
+}
+
+static size_t get_escape_length(const unsigned char *html, size_t length, bool is_attribute)
+{
+    size_t escape_length = length, i = length;
+    while (i-- > 0) {
+        if (!is_attribute && html[i] == '<') {
+            escape_length += sizeof "&lt;" - 2;
+        }
+        else if (!is_attribute && html[i] == '>') {
+            escape_length += sizeof "&gt;" - 2;
+        }
+        else if (html[i] == '&') {
+            escape_length += sizeof "&amp;" - 2;
+        }
+        else if (is_attribute && html[i] == '"') {
+            escape_length += sizeof "&quot;" - 2;
+        }
+        else if (html[i] == 0xA0 && i > 0 && html[i - 1] == 0xC2) {
+            escape_length += sizeof "&nbsp;" - 3;
+            i -= 1;
+        }
+    }
+    return escape_length;
+}
+
+static void escape_inplace(unsigned char *input, size_t input_length, size_t escape_length,
+    bool is_attribute)
+{
+    // We exploit the fact that the escaped string will never be smaller than
+    // the input. This makes it possible to rewrite the input in-place from its end.
+    //
+    // https://dev.w3.org/html5/spec-LC/the-end.html#html-fragment-serialization-algorithm
+    // Section: “Escaping a string”
+
+    if (input_length == escape_length) {
+        return;
+    }
+    size_t e = escape_length - 1;
+    size_t i = input_length;
+    while (i-- > 0) {
+        if (!is_attribute && input[i] == '<') {
+            input[e--] = ';';
+            input[e--] = 't';
+            input[e--] = 'l';
+            input[e--] = '&';
+        }
+        else if (!is_attribute && input[i] == '>') {
+            input[e--] = ';';
+            input[e--] = 't';
+            input[e--] = 'g';
+            input[e--] = '&';
+        }
+        else if (input[i] == '&') {
+            input[e--] = ';';
+            input[e--] = 'p';
+            input[e--] = 'm';
+            input[e--] = 'a';
+            input[e--] = '&';
+        }
+        else if (is_attribute && input[i] == '"') {
+            input[e--] = ';';
+            input[e--] = 't';
+            input[e--] = 'o';
+            input[e--] = 'u';
+            input[e--] = 'q';
+            input[e--] = '&';
+        }
+        else if (input[i] == 0xA0 && i > 0 && input[i - 1] == 0xC2) {
+            input[e--] = ';';
+            input[e--] = 'p';
+            input[e--] = 's';
+            input[e--] = 'b';
+            input[e--] = 'n';
+            input[e--] = '&';
+            i -= 1;
+        }
+        else {
+            input[e--] = input[i];
+        }
+    }
+}
+
+struct String HtmlDocument_get_html(struct HtmlDocument *doc, int node, bool inner)
+{
+    // https://dev.w3.org/html5/spec-LC/the-end.html#html-fragment-serialization-algorithm
+    //
+    // “For HTML elements created by the HTML parser […], tagname will be lowercase.”
+    //
+    // “For attributes on HTML elements set by the HTML parser […], the local name will be
+    // lowercase.”
+
+    if (node < 0 || node >= doc->node_count) {
+        return NULL_STRING;
+    }
+    size_t result_capacity = doc->html_strlen;
+    struct String result = {malloc(result_capacity), 0, true};
+    if (result.data == NULL) {
+        return NULL_STRING;
+    }
+
+    #define EXTEND(_length) \
+        if (result.length + _length >= result_capacity) { \
+            result_capacity += _length + 1024; \
+            char *r = realloc(result.data, result_capacity); \
+            if (r == NULL) { \
+                doc->has_malloc_error = true; \
+                free(result.data); \
+                return NULL_STRING; \
+            } \
+            result.data = r; \
+        }
+
+    if (node == 0) {
+        inner = true;
+    }
+    const struct Node *last_node = &doc->nodes[doc->node_count - 1];
+    for (struct Node *n = &doc->nodes[node + inner];
+        n <= last_node &&
+        (n == &doc->nodes[node] || n->nesting_level > doc->nodes[node].nesting_level);
+        ++n)
+    {
+        if (n->type == NODE_TYPE_COMMENT) {
+            EXTEND(4 + n->content_length + 3);
+            result.data[result.length++] = '<';
+            result.data[result.length++] = '!';
+            result.data[result.length++] = '-';
+            result.data[result.length++] = '-';
+            memcpy(&result.data[result.length], n->content, n->content_length);
+            result.length += n->content_length;
+            result.data[result.length++] = '-';
+            result.data[result.length++] = '-';
+            result.data[result.length++] = '>';
+        }
+        else if (n->type == NODE_TYPE_TEXT) {
+            EXTEND(n->content_length);
+            size_t utf8_length = entities_to_utf8(n->content, n->content_length,
+                &result.data[result.length], true);
+            size_t escape_length = get_escape_length(&result.data[result.length], utf8_length, false);
+            EXTEND(escape_length);
+            escape_inplace(&result.data[result.length], utf8_length, escape_length, false);
+            result.length += escape_length;
+        }
+        else if (n->type == NODE_TYPE_CDATA) {
+            EXTEND(n->content_length);
+            memcpy(&result.data[result.length], n->content, n->content_length);
+            result.length += n->content_length;
+        }
+        else {
+            EXTEND(1 + n->content_length + 1);
+            result.data[result.length++] = '<';
+            for (int i = 0; i < n->content_length; ++i) {
+                result.data[result.length++] = tolower(n->content[i]);
+            }
+
+            struct Attribute *attribute = &doc->attributes[n->attributes];
+            while (attribute < &doc->attributes[n->attributes + n->attributes_count]) {
+
+                EXTEND(1 + attribute->name_length + 2);
+                result.data[result.length++] = ' ';
+                for (int i = 0; i < attribute->name_length; ++i) {
+                    result.data[result.length++] = tolower(attribute->name[i]);
+                }
+                result.data[result.length++] = '=';
+                result.data[result.length++] = '"';
+
+                EXTEND(n->content_length);
+                size_t utf8_length = entities_to_utf8(attribute->value, attribute->value_length,
+                    &result.data[result.length], false);
+                size_t escape_length = get_escape_length(&result.data[result.length], utf8_length, true);
+                EXTEND(escape_length);
+                escape_inplace(&result.data[result.length], utf8_length, escape_length, true);
+                result.length += escape_length;
+
+                EXTEND(1);
+                result.data[result.length++] = '"';
+
+                attribute += 1;
+            }
+
+            result.data[result.length++] = '>';
+        }
+        int preceding_nesting_level = n->nesting_level;
+        int next_nesting_level = n == last_node ||
+            (n + 1)->nesting_level <= doc->nodes[node].nesting_level - 1 ?
+            doc->nodes[node].nesting_level : (n + 1)->nesting_level;
+        if (next_nesting_level <= preceding_nesting_level) {
+            struct Node *counterpart = n;
+            do {
+                if (counterpart->nesting_level == preceding_nesting_level - 1 ||
+                    counterpart->nesting_level == preceding_nesting_level &&
+                    n->type == NODE_TYPE_NONVOID_ELEMENT)
+                {
+                    EXTEND(2 + counterpart->content_length + 1);
+                    result.data[result.length++] = '<';
+                    result.data[result.length++] = '/';
+                    for (int i = 0; i < counterpart->content_length; ++i) {
+                        result.data[result.length++] = tolower(counterpart->content[i]);
+                    }
+                    result.data[result.length++] = '>';
+                    preceding_nesting_level -= 1;
+                }
+                counterpart -= 1;
+                if (inner && counterpart == &doc->nodes[node]) {
+                    break;
+                }
+            } while (preceding_nesting_level > next_nesting_level);
+        }
+    }
+    return result;
+}
+
+struct String HtmlDocument_get_inner_html(struct HtmlDocument *doc, int node)
+{
+    return HtmlDocument_get_html(doc, node, true);
+}
+
+struct String HtmlDocument_get_outer_html(struct HtmlDocument *doc, int node)
+{
+    return HtmlDocument_get_html(doc, node, false);
+}
+
+bool HtmlDocument_has_malloc_error(struct HtmlDocument *doc)
+{
+    // If this function returns true, it means that the extracted data is not reliable and must be
+    // discarded because `malloc` has failed.
+    //
+    // When `malloc` fails, the name, attribute or value of a node may be incorrectly returned as
+    // NULL.
+
+    return doc->has_malloc_error;
+}
+
+struct Selector * HtmlDocument_select(struct HtmlDocument *doc, unsigned int index)
+{
+    struct Selector *s = malloc(sizeof (struct Selector));
+    if (s == NULL) {
+        return NULL;
+    }
+    s->doc = doc;
+    s->item_count = 0;
+    s->active_axis = 0;
+    s->reference_node = index < doc->node_count ? doc->nodes + index : doc->nodes;
+    return s;
 }
 
 /*****************************************************************************/
@@ -1416,12 +1808,15 @@ static void Selector_push_selector(struct Selector *sel, enum SelectorItemType t
         return;
     }
     sel->items[sel->item_count].type = type;
-    if (type < FILTER_OR) {
+    if (type <= AXIS_PRECEDING_SIBLING) {
         sel->items[sel->item_count].position = POSITION_NOT_STARTED;
         sel->items[sel->item_count].axis_n = 0;
     }
     else {
         sel->items[sel->item_count].filter_data.arg1 = filter_arg1;
+        if (type >= FILTER_NODE_NAME) {
+            sel->items[sel->item_count].filter_data.arg1_strlen = strlen(filter_arg1);
+        }
         sel->items[sel->item_count].filter_data.arg2 = filter_arg2;
     }
     sel->item_count += 1;
@@ -1481,7 +1876,7 @@ void Selector_iterate_axis(struct Selector *sel, struct SelectorItem *si, const 
     }
 }
 
-static bool Selector_filter(struct Selector *sel, struct SelectorItem *si, struct Node *node)
+static int Selector_filter(struct Selector *sel, struct SelectorItem *si, struct Node *node)
 {
     if (si->type == FILTER_NTH) {
         struct SelectorItem *axis_selector = si;
@@ -1496,40 +1891,40 @@ static bool Selector_filter(struct Selector *sel, struct SelectorItem *si, struc
         return axis_selector->axis_n == (long) si->filter_data.arg1;
     }
     else if (si->type == FILTER_NODE_NAME) {
-        const char *name = (const char *) si->filter_data.arg1;
-        const char *name_start;
+        const char *name;
         size_t name_length;
         if (node->type == NODE_TYPE_COMMENT) {
-            name_start = "#comment";
+            name = "#comment";
             name_length = sizeof "#comment" - 1;
         }
         else if (node->type == NODE_TYPE_TEXT || node->type == NODE_TYPE_CDATA) {
-            name_start = "#text";
+            name = "#text";
             name_length = sizeof "#text" - 1;
         }
         else {
-            name_start = node->name_start;
-            name_length = node->name_length;
+            name = node->content;
+            name_length = node->content_length;
         }
-        return name_length == strlen(name) && !strnicmp(name_start, name, name_length);
+        return name_length == si->filter_data.arg1_strlen &&
+            !strnicmp(name, si->filter_data.arg1, name_length);
     }
 
-    size_t name_length = strlen(si->filter_data.arg1);
-    for (int i = 0; i < node->attributes_count; ++i) {
-        struct Attribute *attr = &sel->doc->attributes[node->attributes_start + i];
-        if (name_length != attr->name_length ||
-            strnicmp(si->filter_data.arg1, attr->name_start, attr->name_length))
+    struct Attribute *attr_end = &sel->doc->attributes[node->attributes + node->attributes_count];
+    for (
+        struct Attribute *attr = &sel->doc->attributes[node->attributes];
+        attr < attr_end;
+        ++attr
+    ) {
+        if (si->filter_data.arg1_strlen != attr->name_length ||
+            strnicmp(si->filter_data.arg1, attr->name, attr->name_length))
         {
             continue;
         }
         if (si->type == FILTER_ATTRIBUTE_EXISTS) {
             return true;
         }
-        unsigned char *value = malloc(attr->value_length);
-        if (value == NULL) {
-            return -1; // TODO
-        }
-        size_t value_length = entities_to_utf8(attr->value_start, attr->value_length, value, false);
+        unsigned char *value = sel->doc->largest_value_buffer;
+        size_t value_length = entities_to_utf8(attr->value, attr->value_length, value, false);
 
         bool matches = false;
         if (si->type == FILTER_ATTRIBUTE_EQUALS) {
@@ -1558,7 +1953,6 @@ static bool Selector_filter(struct Selector *sel, struct SelectorItem *si, struc
         else if (si->type == FILTER_ATTRIBUTE_STARTS_WITH_I) {
             matches = !strnicmp(si->filter_data.arg2, value, strlen(si->filter_data.arg2));
         }
-        free(value);
 
         if (matches) {
             return true;
@@ -1574,6 +1968,7 @@ int Selector_iterate(struct Selector *sel)
     if (sel->item_count == 0 || sel->items[0].position == POSITION_EXHAUSTED) {
         return -1;
     }
+    bool bool_stack[sizeof sel->items / sizeof *sel->items];
     while (true) {
         int preceding_axis = sel->active_axis;
         while (--preceding_axis >= 0) {
@@ -1596,20 +1991,9 @@ int Selector_iterate(struct Selector *sel)
         }
 
         sel->items[sel->active_axis].axis_n += 1;
-
-        unsigned int bool_stack_capacity = 0;
         int filter_index = sel->active_axis;
-        while (++filter_index < sel->item_count &&
-               sel->items[filter_index].type >= FILTER_OR)
-        {
-            bool_stack_capacity += 1;
-        }
-        bool bool_stack[bool_stack_capacity];
-        filter_index = sel->active_axis;
         signed int bool_stack_size = 0;
-        while (++filter_index < sel->item_count &&
-               sel->items[filter_index].type >= FILTER_OR)
-        {
+        while (++filter_index < sel->item_count && sel->items[filter_index].type >= FILTER_OR) {
             if (sel->items[filter_index].type == FILTER_NOT) {
                 if (bool_stack_size >= 1) {
                     bool_stack[bool_stack_size - 1] = !bool_stack[bool_stack_size - 1];
@@ -1752,316 +2136,10 @@ void Selector_rewind(struct Selector *sel)
     sel->active_axis = 0;
 }
 
-void HtmlDocument_reset(struct Selector *sel)
+void Selector_reset(struct Selector *sel)
 {
     sel->active_axis = 0;
     sel->item_count = 0;
-}
-
-struct String HtmlDocument_get_name(struct HtmlDocument *doc, int node)
-{
-    if (node < 0 || node >= doc->node_count) {
-        return NULL_STRING;
-    }
-    if (doc->nodes[node].type == NODE_TYPE_TEXT || doc->nodes[node].type == NODE_TYPE_CDATA) {
-        return (struct String) {"#text", sizeof "#text" - 1, false};
-    }
-    if (doc->nodes[node].type == NODE_TYPE_COMMENT) {
-        return (struct String) {"#comment", sizeof "#comment" - 1, false};
-    }
-    char *name = malloc(doc->nodes[node].name_length);
-    if (name == NULL) {
-        return NULL_STRING;
-    }
-    for (int i = 0; i < doc->nodes[node].name_length; ++i) {
-        name[i] = tolower(doc->nodes[node].name_start[i]);
-    }
-    return (struct String) {name, doc->nodes[node].name_length, true};
-}
-
-struct String HtmlDocument_get_value(struct HtmlDocument *doc, int node)
-{
-    if (node < 0 || node >= doc->node_count) {
-        return NULL_STRING;
-    }
-    struct Node *n = &doc->nodes[node];
-    if (n->type == NODE_TYPE_CDATA || n->type == NODE_TYPE_COMMENT) {
-        return (struct String) {(unsigned char *) n->value_start, n->value_length, false};
-    }
-    if (n->type == NODE_TYPE_TEXT) {
-        unsigned char *buffer = malloc(n->value_length);
-        if (buffer == NULL) {
-            return NULL_STRING;
-        }
-        size_t buffer_length = entities_to_utf8(n->value_start, n->value_length, buffer, true);
-        unsigned char *buffer_realloc = realloc(buffer, buffer_length);
-        if (buffer_realloc == NULL) {
-            free(buffer);
-            return NULL_STRING;
-        }
-        return (struct String) {buffer_realloc, buffer_length, true};
-    }
-    return NULL_STRING;
-}
-
-struct String HtmlDocument_get_attribute(struct HtmlDocument *doc, int node, const char *attribute)
-{
-    if (node < 0 || node >= doc->node_count) {
-        return NULL_STRING;
-    }
-    size_t strlen_attribute = strlen(attribute);
-    struct Attribute *attributes = &doc->attributes[doc->nodes[node].attributes_start];
-    for (int i = 0; i < doc->nodes[node].attributes_count; ++i) {
-        if (attributes[i].name_length == strlen_attribute &&
-            !strnicmp(attributes[i].name_start, attribute, attributes[i].name_length))
-        {
-            struct Attribute *a = &attributes[i];
-            unsigned char *buffer = malloc(a->value_length);
-            if (buffer == NULL) {
-                return NULL_STRING;
-            }
-            size_t buffer_length = entities_to_utf8(a->value_start, a->value_length, buffer, false);
-            unsigned char *buffer_realloc = realloc(buffer, buffer_length);
-            if (buffer_realloc == NULL) {
-                free(buffer);
-                return NULL_STRING;
-            }
-            return (struct String) {buffer, buffer_length, true};
-        }
-    }
-    return NULL_STRING;
-}
-
-static size_t get_escape_length(const unsigned char *html, size_t length, bool is_attribute)
-{
-    size_t escape_length = length, i = length;
-    while (i-- > 0) {
-        if (!is_attribute && html[i] == '<') {
-            escape_length += sizeof "&lt;" - 2;
-        }
-        else if (!is_attribute && html[i] == '>') {
-            escape_length += sizeof "&gt;" - 2;
-        }
-        else if (html[i] == '&') {
-            escape_length += sizeof "&amp;" - 2;
-        }
-        else if (is_attribute && html[i] == '"') {
-            escape_length += sizeof "&quot;" - 2;
-        }
-        else if (html[i] == 0xA0 && i > 0 && html[i - 1] == 0xC2) {
-            escape_length += sizeof "&nbsp;" - 3;
-            i -= 1;
-        }
-    }
-    return escape_length;
-}
-
-static void escape_inplace(unsigned char *input, size_t input_length, size_t escape_length,
-    bool is_attribute)
-{
-    // We exploit the fact that the escaped string will never be smaller than
-    // the input. This makes it possible to rewrite the input in-place from its end.
-    //
-    // https://dev.w3.org/html5/spec-LC/the-end.html#html-fragment-serialization-algorithm
-    // Section: “Escaping a string”
-
-    if (input_length == escape_length) {
-        return;
-    }
-    size_t e = escape_length - 1;
-    size_t i = input_length;
-    while (i-- > 0) {
-        if (!is_attribute && input[i] == '<') {
-            input[e--] = ';';
-            input[e--] = 't';
-            input[e--] = 'l';
-            input[e--] = '&';
-        }
-        else if (!is_attribute && input[i] == '>') {
-            input[e--] = ';';
-            input[e--] = 't';
-            input[e--] = 'g';
-            input[e--] = '&';
-        }
-        else if (input[i] == '&') {
-            input[e--] = ';';
-            input[e--] = 'p';
-            input[e--] = 'm';
-            input[e--] = 'a';
-            input[e--] = '&';
-        }
-        else if (is_attribute && input[i] == '"') {
-            input[e--] = ';';
-            input[e--] = 't';
-            input[e--] = 'o';
-            input[e--] = 'u';
-            input[e--] = 'q';
-            input[e--] = '&';
-        }
-        else if (input[i] == 0xA0 && i > 0 && input[i - 1] == 0xC2) {
-            input[e--] = ';';
-            input[e--] = 'p';
-            input[e--] = 's';
-            input[e--] = 'b';
-            input[e--] = 'n';
-            input[e--] = '&';
-            i -= 1;
-        }
-        else {
-            input[e--] = input[i];
-        }
-    }
-}
-
-struct String HtmlDocument_get_html(struct HtmlDocument *doc, int node, bool inner)
-{
-    // https://dev.w3.org/html5/spec-LC/the-end.html#html-fragment-serialization-algorithm
-    //
-    // “For HTML elements created by the HTML parser […], tagname will be lowercase.”
-    //
-    // “For attributes on HTML elements set by the HTML parser […], the local name will be
-    // lowercase.”
-
-    if (node < 0 || node >= doc->node_count) {
-        return NULL_STRING;
-    }
-    size_t result_capacity = doc->html_strlen;
-    struct String result = {malloc(result_capacity), 0, true};
-    if (result.data == NULL) {
-        return NULL_STRING;
-    }
-
-    #define EXTEND(_length) \
-        if (result.length + _length >= result_capacity) { \
-            result_capacity += _length + 1024; \
-            char *r = realloc(result.data, result_capacity); \
-            if (r == NULL) { \
-                free(result.data); \
-                return NULL_STRING; \
-            } \
-            result.data = r; \
-        }
-
-    if (node == 0) {
-        inner = true;
-    }
-    const struct Node *last_node = &doc->nodes[doc->node_count - 1];
-    for (struct Node *n = &doc->nodes[node + inner];
-        n <= last_node &&
-        (n == &doc->nodes[node] || n->nesting_level > doc->nodes[node].nesting_level);
-        ++n)
-    {
-        if (n->type == NODE_TYPE_COMMENT) {
-            EXTEND(4 + n->value_length + 3);
-            result.data[result.length++] = '<';
-            result.data[result.length++] = '!';
-            result.data[result.length++] = '-';
-            result.data[result.length++] = '-';
-            memcpy(&result.data[result.length], n->value_start, n->value_length);
-            result.length += n->value_length;
-            result.data[result.length++] = '-';
-            result.data[result.length++] = '-';
-            result.data[result.length++] = '>';
-        }
-        else if (n->type == NODE_TYPE_TEXT) {
-            EXTEND(n->value_length);
-            size_t utf8_length = entities_to_utf8(n->value_start, n->value_length,
-                &result.data[result.length], true);
-            size_t escape_length = get_escape_length(&result.data[result.length], utf8_length, false);
-            EXTEND(escape_length);
-            escape_inplace(&result.data[result.length], utf8_length, escape_length, false);
-            result.length += escape_length;
-        }
-        else if (n->type == NODE_TYPE_CDATA) {
-            EXTEND(n->value_length);
-            memcpy(&result.data[result.length], n->value_start, n->value_length);
-            result.length += n->value_length;
-        }
-        else {
-            EXTEND(1 + n->name_length + 1);
-            result.data[result.length++] = '<';
-            for (int i = 0; i < n->name_length; ++i) {
-                result.data[result.length++] = tolower(n->name_start[i]);
-            }
-
-            struct Attribute *attribute = &doc->attributes[n->attributes_start];
-            while (attribute < &doc->attributes[n->attributes_start + n->attributes_count]) {
-
-                EXTEND(1 + attribute->name_length + 2);
-                result.data[result.length++] = ' ';
-                for (int i = 0; i < attribute->name_length; ++i) {
-                    result.data[result.length++] = tolower(attribute->name_start[i]);
-                }
-                result.data[result.length++] = '=';
-                result.data[result.length++] = '"';
-
-                EXTEND(n->value_length);
-                size_t utf8_length = entities_to_utf8(attribute->value_start, attribute->value_length,
-                    &result.data[result.length], false);
-                size_t escape_length = get_escape_length(&result.data[result.length], utf8_length, true);
-                EXTEND(escape_length);
-                escape_inplace(&result.data[result.length], utf8_length, escape_length, true);
-                result.length += escape_length;
-
-                EXTEND(1);
-                result.data[result.length++] = '"';
-
-                attribute += 1;
-            }
-
-            result.data[result.length++] = '>';
-        }
-        int preceding_nesting_level = n->nesting_level;
-        int next_nesting_level = n == last_node ||
-            (n + 1)->nesting_level <= doc->nodes[node].nesting_level - 1 ?
-            doc->nodes[node].nesting_level : (n + 1)->nesting_level;
-        if (next_nesting_level <= preceding_nesting_level) {
-            struct Node *counterpart = n;
-            do {
-                if (counterpart->nesting_level == preceding_nesting_level - 1 ||
-                    counterpart->nesting_level == preceding_nesting_level &&
-                    n->type == NODE_TYPE_NONVOID_ELEMENT)
-                {
-                    EXTEND(2 + counterpart->name_length + 1);
-                    result.data[result.length++] = '<';
-                    result.data[result.length++] = '/';
-                    for (int i = 0; i < counterpart->name_length; ++i) {
-                        result.data[result.length++] = tolower(counterpart->name_start[i]);
-                    }
-                    result.data[result.length++] = '>';
-                    preceding_nesting_level -= 1;
-                }
-                counterpart -= 1;
-                if (inner && counterpart == &doc->nodes[node]) {
-                    break;
-                }
-            } while (preceding_nesting_level > next_nesting_level);
-        }
-    }
-    return result;
-}
-
-struct String HtmlDocument_get_inner_html(struct HtmlDocument *doc, int node)
-{
-    return HtmlDocument_get_html(doc, node, true);
-}
-
-struct String HtmlDocument_get_outer_html(struct HtmlDocument *doc, int node)
-{
-    return HtmlDocument_get_html(doc, node, false);
-}
-
-struct Selector * HtmlDocument_select(struct HtmlDocument *doc, unsigned int index)
-{
-    struct Selector *s = malloc(sizeof (struct Selector));
-    if (s == NULL) {
-        return NULL;
-    }
-    s->doc = doc;
-    s->item_count = 0;
-    s->active_axis = 0;
-    s->reference_node = index < doc->node_count ? doc->nodes + index : doc->nodes;
-    return s;
 }
 
 /*****************************************************************************/
@@ -2087,8 +2165,7 @@ struct String resolve_iri(struct String reference, struct String base)
     // https://en.wikipedia.org/wiki/URI_normalization
     // https://www.rfc-editor.org/rfc/rfc3986#section-5.2.4
     //
-    // TODO: We will convert IDNA to ASCII because some network clients may not support IDN, notably
-    // PHP's `file_get_contents`. In cURL, IDN support is controlled via a build option.
+    // TODO: Convert IDNA to ASCII
 
     int i;
     enum {
@@ -2098,28 +2175,28 @@ struct String resolve_iri(struct String reference, struct String base)
         COMPONENT_RELATIVE_PATH,
         COMPONENT_QUERY_STRING,
         COMPONENT_FRAGMENT
-    } reference_start_component;
+    } reference_component;
 
     if (reference.length >= 2 && reference.data[0] == '/' && reference.data[1] == '/') {
-        reference_start_component = COMPONENT_AUTHORITY;
+        reference_component = COMPONENT_AUTHORITY;
     }
     else if (reference.length == 0 || reference.data[0] == '#') {
-        reference_start_component = COMPONENT_FRAGMENT;
+        reference_component = COMPONENT_FRAGMENT;
     }
     else if (reference.data[0] == '/') {
-        reference_start_component = COMPONENT_ABSOLUTE_PATH;
+        reference_component = COMPONENT_ABSOLUTE_PATH;
     }
     else if (reference.data[0] == '?') {
-        reference_start_component = COMPONENT_QUERY_STRING;
+        reference_component = COMPONENT_QUERY_STRING;
     }
     else {
-        reference_start_component = COMPONENT_RELATIVE_PATH;
+        reference_component = COMPONENT_RELATIVE_PATH;
         for (i = 0; i < reference.length; ++i) {
             if (reference.data[i] == '?') {
                 break;
             }
             if (reference.data[i] == ':') {
-                reference_start_component = COMPONENT_SCHEME;
+                reference_component = COMPONENT_SCHEME;
                 break;
             }
         }
@@ -2142,7 +2219,7 @@ struct String resolve_iri(struct String reference, struct String base)
         } \
         normalized.data[normalized.length++] = c;
 
-    struct String source = reference_start_component == COMPONENT_SCHEME ? reference : base;
+    struct String source = reference_component == COMPONENT_SCHEME ? reference : base;
     i = 0;
 
     // Copy the scheme from `source` to the result
@@ -2160,14 +2237,14 @@ struct String resolve_iri(struct String reference, struct String base)
 
     // Copy the authority from `source` to the result
 
-    if (reference_start_component == COMPONENT_AUTHORITY) {
+    if (reference_component == COMPONENT_AUTHORITY) {
         source = reference;
         i = 0;
     }
     if (i + 1 < source.length && source.data[i] == '/' && source.data[i + 1] == '/') {
-        int authority_start_index = i;
+        int authority_index = i;
         int at_index = -1;
-        for (i = authority_start_index + 2; i < source.length && source.data[i] != '/' &&
+        for (i = authority_index + 2; i < source.length && source.data[i] != '/' &&
                 source.data[i] != '?' && source.data[i] != '#' && source.data[i] != ':'; ++i)
         {
             if (source.data[i] == '@') {
@@ -2175,11 +2252,11 @@ struct String resolve_iri(struct String reference, struct String base)
             }
         }
         int domain_end_index = i;
-        int domain_start_index = at_index >= 0 ? at_index + 1 : authority_start_index + 2;
-        for (i = authority_start_index; i < domain_start_index; ++i) {
+        int domain_index = at_index >= 0 ? at_index + 1 : authority_index + 2;
+        for (i = authority_index; i < domain_index; ++i) {
             APPEND(source.data[i]);
         }
-        for (i = domain_start_index; i < domain_end_index; ++i) {
+        for (i = domain_index; i < domain_end_index; ++i) {
             if (source.data[i] > 127) {
                 free(normalized.data);
                 return NULL_STRING;
@@ -2190,7 +2267,7 @@ struct String resolve_iri(struct String reference, struct String base)
             do {
                 i += 1;
             } while (source.data[i] == '0');
-            int port_start_i = i;
+            int port_i = i;
             int port = 0;
             while (
                 i < source.length && source.data[i] != '/' && source.data[i] != '?' &&
@@ -2208,7 +2285,7 @@ struct String resolve_iri(struct String reference, struct String base)
                 (port != 443 || strncmp(normalized.data, "https", scheme_length)))
             {
                 APPEND(':');
-                for (int k = port_start_i; k < i; ++k) {
+                for (int k = port_i; k < i; ++k) {
                     APPEND(source.data[k]);
                 }
             }
@@ -2222,12 +2299,12 @@ struct String resolve_iri(struct String reference, struct String base)
     // Copy the path from `source` to the result. When copying from `base`, `cut_off` specifies the
     // index at which to switch to `reference` as the source.
 
-    if (reference_start_component == COMPONENT_ABSOLUTE_PATH) {
+    if (reference_component == COMPONENT_ABSOLUTE_PATH) {
         source = reference;
         i = 1;
     }
     int cut_off;
-    if (reference_start_component == COMPONENT_RELATIVE_PATH) {
+    if (reference_component == COMPONENT_RELATIVE_PATH) {
         cut_off = i;
         while (base.data[cut_off] != '?' && base.data[cut_off] != '#' && cut_off < base.length) {
             cut_off += 1;
@@ -2241,7 +2318,7 @@ struct String resolve_iri(struct String reference, struct String base)
         cut_off = -1;
     }
     bool is_in_path = true;
-    int normalized_path_start = normalized.length - 1;
+    int normalized_path = normalized.length - 1;
     while (true) {
         if (i >= source.length) {
             if (source.data != reference.data || source.length != reference.length) {
@@ -2260,7 +2337,7 @@ struct String resolve_iri(struct String reference, struct String base)
         }
         else if (source.data[i] == '?') {
             is_in_path = false;
-            if (reference_start_component == COMPONENT_QUERY_STRING && source.data == base.data) {
+            if (reference_component == COMPONENT_QUERY_STRING && source.data == base.data) {
                 source = reference;
                 i = 0;
             }
@@ -2268,7 +2345,7 @@ struct String resolve_iri(struct String reference, struct String base)
         }
         else if (source.data[i] == '#') {
             is_in_path = false;
-            if (reference_start_component == COMPONENT_FRAGMENT && source.data == base.data) {
+            if (reference_component == COMPONENT_FRAGMENT && source.data == base.data) {
                 source = reference;
                 i = 0;
             }
@@ -2296,7 +2373,7 @@ struct String resolve_iri(struct String reference, struct String base)
             if (source.data[i] == '/') {
                 i += 1;
             }
-            if (normalized.length - 1 == normalized_path_start) {
+            if (normalized.length - 1 == normalized_path) {
                 continue;
             }
             while (normalized.data[normalized.length] != '/') {
@@ -2309,18 +2386,19 @@ struct String resolve_iri(struct String reference, struct String base)
             continue;
         }
         else if (source.data[i] == '%') {
-            if (i + 2 > source.length - 1) {
-                // Invalid URL
+            i += 1;
+            if (i + 1 >= source.length) {
                 APPEND('%');
                 continue;
             }
-            i += 1;
             char hex_digit1 = from_hex(source.data[i]);
             if (hex_digit1 < 0) {
+                APPEND('%');
                 continue;
             }
             char hex_digit2 = from_hex(source.data[i + 1]);
             if (hex_digit2 < 0) {
+                APPEND('%');
                 continue;
             }
             int hex = hex_digit1 * 16 + hex_digit2;

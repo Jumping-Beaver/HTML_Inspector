@@ -22,14 +22,14 @@ static void HtmlDocument_dump(struct HtmlDocument *doc)
             node->type == NODE_TYPE_COMMENT ? "comment" :
             node->type == NODE_TYPE_CDATA ? "cdata" :
             node->type == NODE_TYPE_TEXT ? "text" : "?",
-            node->name_length, node->name_start
+            node->content_length, node->content
         );
-        struct Attribute *attribute = &doc->attributes[node->attributes_start];
-        while (attribute < &doc->attributes[node->attributes_start + node->attributes_count]) {
+        struct Attribute *attribute = &doc->attributes[node->attributes];
+        while (attribute < &doc->attributes[node->attributes + node->attributes_count]) {
             printf(
                 ", %.*s=%.*s",
-                attribute->name_length, attribute->name_start,
-                attribute->value_length, attribute->value_start
+                attribute->name_length, attribute->name,
+                attribute->value_length, attribute->value
             );
             attribute += 1;
         }
@@ -107,13 +107,13 @@ static void benchmark()
 
 static void test_resolve_iri()
 {
-    // TODO: Rename string to charseq?
     struct String base = STRING("http://a/b/c/d;p?q");
     struct {
         struct String base;
         struct String relative;
         struct String target;
     } test_cases[] = {
+        {STRING("/%p%p"), STRING(""), STRING("/%p%p")},
         {base, base, base}, // Asserting that there is no endless loop if `reference == base`
         {NULL_STRING, STRING("http://a/b"), STRING("http://a/b")},
         {STRING(""), STRING("http://a/→"), STRING("http://a/%E2%86%92")},
@@ -187,12 +187,15 @@ static void test_resolve_iri()
 
 static void test_outer_html()
 {
-    // TODO: Insert empty head or not?
     struct {
         const char *input;
         const char *outer_html;
     } test_cases[] = {
-        {"a", "<html><body>a</body></html>"},
+        {"<<b>", "<html><head></head><body>&lt;<b></b></body></html>"},
+        {"<a><table><a>", "<html><head></head><body><a><a></a><table></table></a></body></html>"},
+        {"<!comment>text-->", "<!--comment--><html><head></head><body>text--&gt;</body></html>"},
+        {"<42></42>", "<html><head></head><body>&lt;42&gt;<!--42--></body></html>"},
+        {"<body id=>", "<html><head></head><body id=\"\"></body></html>"},
         {"<ul><li>1<li><ul><li>2</ul></ul>", "<html><head></head><body><ul><li>1</li><li><ul><li>2</li></ul></li></ul></body></html>"},
         {"<body a='<>&quot;'>&auml;&gt;&lt;&quot;&z", "<html><head></head><body a=\"<>&quot;\">ä&gt;&lt;\"&amp;z</body></html>"},
         {"<HTML LANG=en><META></HTML>", "<html lang=\"en\"><head><meta></head></html>"},
@@ -206,8 +209,8 @@ static void test_outer_html()
         {"<head><meta><body>", "<html><head><meta></head><body></body></html>"},
         {"<p>p<div>div</div></p>", "<html><head></head><body><p>p</p><div>div</div></body></html>"},
         {"<table><tr><td>a", "<html><head></head><body><table><tbody><tr><td>a</td></tr></tbody></table></body></html>"},
-        {"b</stray>c", "<html><body>bc</body></html>"},
-        {" <!--a-->b", "<!--a--><html><body>b</body></html>"},
+        {"b</stray>c", "<html><head></head><body>bc</body></html>"},
+        {" <!--a-->b", "<!--a--><html><head></head><body>b</body></html>"},
         {"<script><a>&auml;", "<html><head><script><a>&auml;</script></head></html>"},
         {"<title>a", "<html><head><title>a</title></head></html>"},
     };
@@ -230,8 +233,9 @@ static void test_outer_html()
 int main()
 {
     test_outer_html();
+    return 0;
     //benchmark();
     //test_extract_charset();
-    //test_resolve_iri();
+    test_resolve_iri();
     return 0;
 }

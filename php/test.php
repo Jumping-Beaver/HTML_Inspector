@@ -7,11 +7,11 @@ function benchmark_HtmlInspector()
 
     $time = microtime(true);
     $num = 0;
-    for ($i = 0; $i < 100; ++$i) {
+    for ($i = 0; $i < 200; ++$i) {
         $doc = new HtmlInspector\HtmlDocument($html);
-        $selector = $doc->select(0)->descendant()->name('a');
+        $selector = $doc->select(0)->descendant()->name('a')->attribute_contains('href', 'abc');
         while (($node = $selector->iterate()) != -1) {
-            $doc->get_outer_html($node);
+            //$doc->get_outer_html($node);
             $href = $doc->get_attribute($node, 'href');
             $num += strlen($href);
         }
