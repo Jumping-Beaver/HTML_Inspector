@@ -14,6 +14,35 @@ its larger code base.
 
 See also: `https://wiki.php.net/rfc/domdocument_html5_parser`
 
+### Python's lxml module is seriously broken
+
+`lxml` is a Python binding for libxml2. It cannot used to parse HTML correctly. Examples of
+incorrect behavior follow.
+
+Here is omits the script content and generally it incorrectly creates self-closing tags:
+```
+>>> lxml.etree.tostring(lxml.etree.HTML('<script></</script>'))
+b'<html><head><script/></head></html>'
+```
+
+None of the `<a>` strings must be modified here:
+```
+lxml.etree.tostring(lxml.etree.HTML('<title><a></title><textarea><a></textarea><script><a></script>'))
+b'<html><head><title><a/></title><textarea><a/></textarea><script>&lt;a&gt;</script></head></html>'
+```
+
+Inserting a `<p>` node is incorrect:
+```
+>>> lxml.etree.tostring(lxml.etree.HTML('fragment'))
+b'<html><body><p>fragment</p></body></html>'
+````
+
+`&` must not be escaped in script tags:
+```
+>>> lxml.etree.tostring(lxml.etree.HTML('<script>&uuml;</script>'))
+b'<html><head><script>&amp;uuml;</script></head></html>'
+```
+
 ## Usage
 
 ### General

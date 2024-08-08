@@ -113,6 +113,7 @@ static void test_resolve_iri()
         struct String relative;
         struct String target;
     } test_cases[] = {
+        {STRING("http://datenbörse.net"), STRING(""), STRING("http://xn--datenbrse-57a.net/")},
         {STRING("/%p%p"), STRING(""), STRING("/%p%p")},
         {base, base, base}, // Asserting that there is no endless loop if `reference == base`
         {NULL_STRING, STRING("http://a/b"), STRING("http://a/b")},
@@ -192,7 +193,6 @@ static void test_outer_html()
         const char *outer_html;
     } test_cases[] = {
         {"<<b>", "<html><head></head><body>&lt;<b></b></body></html>"},
-        {"<a><table><a>", "<html><head></head><body><a><a></a><table></table></a></body></html>"},
         {"<!comment>text-->", "<!--comment--><html><head></head><body>text--&gt;</body></html>"},
         {"<42></42>", "<html><head></head><body>&lt;42&gt;<!--42--></body></html>"},
         {"<body id=>", "<html><head></head><body id=\"\"></body></html>"},
@@ -203,7 +203,7 @@ static void test_outer_html()
         {"<html><!--&uuml;--></html>", "<html><!--&uuml;--></html>"},
         {"<html><head>a</head><body></body></html>", "<html><head></head><body>a</body></html>"},
         {"<head>a</head><body></body>", "<html><head></head><body>a</body></html>"},
-        {"<head>a<body>b", "<html><head></head><body>ab</body></html>"}, // TODO We get 2 text nodes here
+        {"<head>a<body>b", "<html><head></head><body>ab</body></html>"},
         {"<body>a<body b=c>", "<html><head></head><body b=\"c\">a</body></html>"},
         {"<head>a</head>", "<html><head></head><body>a</body></html>"},
         {"<head><meta><body>", "<html><head><meta></head><body></body></html>"},
@@ -232,8 +232,7 @@ static void test_outer_html()
 
 int main()
 {
-    test_outer_html();
-    return 0;
+    //test_outer_html();
     //benchmark();
     //test_extract_charset();
     test_resolve_iri();

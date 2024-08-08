@@ -394,7 +394,9 @@ static size_t entities_to_utf8(const unsigned char *input, size_t input_length, 
     size_t i = 0, k;
     const unsigned char *original_output = output;
     for (i = 0; i < input_length; ++i) {
-        if (skip_stray_tags && input[i] == '<' && i + 1 < input_length && input[i + 1] == '/') {
+        if (skip_stray_tags && input[i] == '<' && i + 1 < input_length &&
+            (input[i + 1] == '/' || CHARMASK_VALID_TAG_NAME_START[input[i + 1]]))
+        {
             do {
                 i += 1;
             } while (i < input_length && input[i] != '>');
@@ -1370,6 +1372,13 @@ static struct HtmlDocument * HtmlDocument(const unsigned char *html, size_t html
                 has_only_whitespace &= CHARMASK_WHITESPACE[html[text_node_length]];
                 text_node_length += 1;
             }
+            if (node->type == NODE_TYPE_TEXT) {
+                // Example: `a<body>b` -> `<body>ab</body>`;`<body>` between `a` and
+                // `b` is a skipped stray tag
+                node->content_length = &html[text_node_length] - node->content;
+                html += text_node_length;
+                continue;
+            }
         }
 
         if (text_node_length == 0) {
@@ -2142,7 +2151,46 @@ void Selector_reset(struct Selector *sel)
     sel->item_count = 0;
 }
 
+enum punycode_status {
+  punycode_success,
+  punycode_bad_input,   /* Input is invalid.                       */
+  punycode_big_output,  /* Output would exceed the space provided. */
+  punycode_overflow     /* Input needs wider integers to process.  */
+};
+
+#if UINT_MAX >= (1 << 26) - 1
+typedef unsigned int punycode_uint;
+#else
+typedef unsigned long punycode_uint;
+#endif
+
 /*****************************************************************************/
+/* encode_digit(d,flag) returns the basic code point whose value      */
+/* (when used for representing integers) is d, which needs to be in   */
+/* the range 0 to base-1.  The lowercase form is used unless flag is  */
+/* nonzero, in which case the uppercase form is used.  The behavior   */
+/* is undefined if flag is nonzero and digit d has no uppercase form. */
+
+static char encode_digit(punycode_uint d)
+{
+    return d + 22 + 75 * (d < 26);
+    /*  0..25 map to ASCII a..z or A..Z */
+    /* 26..35 map to ASCII 0..9         */
+}
+
+enum { BASE = 36, TMIN = 1, TMAX = 26, SKEW = 38, DAMP = 700};
+
+static punycode_uint adapt(punycode_uint delta, punycode_uint numpoints, int firsttime)
+{
+    punycode_uint k;
+
+    delta = firsttime ? delta / DAMP : delta >> 1;
+    delta += delta / numpoints;
+    for (k = 0;  delta > ((BASE - TMIN) * TMAX) / 2;  k += BASE) {
+        delta /= BASE - TMIN;
+    }
+    return k + (BASE - TMIN + 1) * delta / (delta + SKEW);
+}
 
 static int from_hex(char c)
 {
@@ -2251,18 +2299,137 @@ struct String resolve_iri(struct String reference, struct String base)
                 at_index = i;
             }
         }
-        int domain_end_index = i;
-        int domain_index = at_index >= 0 ? at_index + 1 : authority_index + 2;
-        for (i = authority_index; i < domain_index; ++i) {
+        int domain_end = i;
+        int domain_start = at_index >= 0 ? at_index + 1 : authority_index + 2;
+        for (i = authority_index; i < domain_start; ++i) {
             APPEND(source.data[i]);
         }
-        for (i = domain_index; i < domain_end_index; ++i) {
-            if (source.data[i] > 127) {
-                free(normalized.data);
-                return NULL_STRING;
+
+        // Append domain and convert IDN to ASCII
+        // Punycode implementation see: https://datatracker.ietf.org/doc/html/rfc3492
+
+        int domain_label_start = domain_start;
+        while (true) {
+            uint32_t codepoints[63];
+            int num_codepoints = 0;
+            punycode_uint num_basic_codepoints = 0;
+            for (i = domain_label_start; i < domain_end && source.data[i] != '.'; ++i) {
+                if (i - domain_label_start >= 63) {
+                    // “Each node [of the domain name space] has a label, which is zero to 63
+                    // octets in length.” https://datatracker.ietf.org/doc/html/rfc1034#section-3.1
+
+                    free(source.data);
+                    return NULL_STRING;
+                }
+                if (source.data[i] < 0b10000000) {
+                    codepoints[num_codepoints++] = source.data[i];
+                    num_basic_codepoints++;
+                }
+                else if (source.data[i] < 0b11100000) {
+                    if (i + 1 >= domain_end) {
+                        return NULL_STRING;
+                    }
+                    codepoints[num_codepoints++] =
+                        ((source.data[i] & 0b00011111) << 6) +
+                        (source.data[i + 1] & 0b00111111);
+                    i += 1;
+                }
+                else if (source.data[i] < 0b11110000) {
+                    if (i + 2 >= domain_end) {
+                        return NULL_STRING;
+                    }
+                    codepoints[num_codepoints++] =
+                        (source.data[i] & 0b00001111) << 12 +
+                        (source.data[i + 1] & 0b00111111) << 6 +
+                        (source.data[i + 2] & 0b00111111);
+                    i += 2;
+                }
+                else if (source.data[i] < 0b11111000) {
+                    if (i + 3 >= domain_end) {
+                        return NULL_STRING;
+                    }
+                    codepoints[num_codepoints++] =
+                        (source.data[i] & 0b00000111) << 18 +
+                        (source.data[i + 1] & 0b00111111) << 12 +
+                        (source.data[i + 2] & 0b00111111) << 6 +
+                        (source.data[i + 3] & 0b00111111);
+                    i += 3;
+                }
             }
-            APPEND(tolower(source.data[i]));
+            if (num_codepoints > num_basic_codepoints) {
+                APPEND('x');
+                APPEND('n');
+                APPEND('-');
+                APPEND('-');
+            }
+            for (i = domain_label_start; i < domain_end && source.data[i] != '.'; ++i) {
+                if (source.data[i] < 128) {
+                    APPEND(tolower(source.data[i]));
+                }
+            }
+            domain_label_start = i;
+            if (num_codepoints > num_basic_codepoints) {
+                APPEND('-');
+            }
+
+            punycode_uint bias = 72;
+            punycode_uint next_codepoint, codepoint = 128;
+            punycode_uint delta = 0;
+            punycode_uint k, t;
+            punycode_uint num_handled_codepoints = num_basic_codepoints;
+            const punycode_uint MAX_INT = -1;
+
+            while (num_handled_codepoints < num_codepoints) {
+                for (next_codepoint = MAX_INT, i = 0; i < num_codepoints; ++i) {
+                    if (codepoints[i] >= codepoint && codepoints[i] < next_codepoint) {
+                        next_codepoint = codepoints[i];
+                    }
+                }
+
+                if (next_codepoint - codepoint > (MAX_INT - delta) / (num_handled_codepoints + 1)) {
+                    free(source.data);
+                    return NULL_STRING;
+                    //return punycode_overflow;
+                }
+                delta += (next_codepoint - codepoint) * (num_handled_codepoints + 1);
+                codepoint = next_codepoint;
+
+                punycode_uint q;
+                for (i = 0; i < num_codepoints; ++i) {
+                    if (codepoints[i] < codepoint && ++delta == 0) {
+                        free(source.data);
+                        return NULL_STRING;
+                        //return punycode_overflow;
+                    }
+                    if (codepoints[i] == codepoint) {
+                        for (q = delta, k = BASE;  ; k += BASE) {
+                            t = k <= bias ? TMIN : k >= bias + TMAX ? TMAX : k - bias;
+                            if (q < t) {
+                                break;
+                            }
+                            APPEND(encode_digit(t + (q - t) % (BASE - t)));
+                            q = (q - t) / (BASE - t);
+                        }
+
+                        APPEND(encode_digit(q));
+                        bias = adapt(delta, num_handled_codepoints + 1,
+                            num_handled_codepoints == num_basic_codepoints);
+                        delta = 0;
+                        num_handled_codepoints++;
+                    }
+                }
+                ++delta;
+                ++codepoint;
+            }
+            if (source.data[domain_label_start++] != '.') {
+                break;
+            }
+            APPEND('.');
         }
+        i = domain_end;
+
+        // Append port
+
         if (source.data[i] == ':') {
             do {
                 i += 1;
