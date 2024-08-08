@@ -15,16 +15,17 @@
 // Size of entities array indexed by first character: 27 kB
 
 #include <stdio.h>
+#include <stdint.h>
 #include <string.h>
 #include <stdbool.h>
 #include "entities.h"
 
 int main()
 {
-    fputs("const char *entities[256] = {\n", stdout);
-    for (int c = 0; c <= 255; ++c) {
+    fputs("static const char *ENTITIES[1 + (unsigned char) -1] = {\n", stdout);
+    for (uint_fast16_t c = 0; c <= 255; ++c) {
         bool print_entries = false;
-        for (int i = 0; i < sizeof entities / sizeof *entities; ++i) {
+        for (uint_fast16_t i = 0; i < sizeof entities / sizeof *entities; ++i) {
             if (entities[i].entity[0] == c) {
                 print_entries = true;
                 break;
@@ -34,14 +35,14 @@ int main()
             continue;
         }
         printf("    ['%c'] =\n    \"", c);
-        int num_printed = 0;
-        for (int i = 0; i < sizeof entities / sizeof *entities; ++i) {
+        uint_fast8_t line_length = 0;
+        for (size_t i = 0; i < sizeof entities / sizeof *entities; ++i) {
             if (entities[i].entity[0] != c) {
                 continue;
             }
-            if (num_printed > 90) {
+            if (line_length > 90) {
                 printf("\"\n    \"");
-                num_printed = 0;
+                line_length = 0;
             }
             printf("&%s", entities[i].entity);
             if (entities[i].decoding == "\"") {
@@ -50,7 +51,7 @@ int main()
             else {
                 fputs(entities[i].decoding, stdout);
             }
-            num_printed += strlen(entities[i].entity) + strlen(entities[i].decoding);
+            line_length += strlen(entities[i].entity) + strlen(entities[i].decoding);
         }
         fputs("\",\n", stdout);
     }

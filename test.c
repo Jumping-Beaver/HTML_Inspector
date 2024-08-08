@@ -22,14 +22,14 @@ static void HtmlDocument_dump(struct HtmlDocument *doc)
             node->type == NODE_TYPE_COMMENT ? "comment" :
             node->type == NODE_TYPE_CDATA ? "cdata" :
             node->type == NODE_TYPE_TEXT ? "text" : "?",
-            node->content_length, node->content
+            (int) node->content_length, node->content
         );
         struct Attribute *attribute = &doc->attributes[node->attributes];
         while (attribute < &doc->attributes[node->attributes + node->attributes_count]) {
             printf(
                 ", %.*s=%.*s",
-                attribute->name_length, attribute->name,
-                attribute->value_length, attribute->value
+                (int) attribute->name_length, attribute->name,
+                (int) attribute->value_length, attribute->value
             );
             attribute += 1;
         }
@@ -50,7 +50,7 @@ static void HtmlDocument_print_stats(struct HtmlDocument *doc)
     }
     int memory = doc->node_count * sizeof (struct Node) + attributes_count * sizeof (struct Attribute);
     printf("Maximum nesting level: %d\n", max_nesting_level);
-    printf("Number of nodes: %d\n", doc->node_count);
+    printf("Number of nodes: %zu\n", doc->node_count);
     printf("Number of attributes: %d\n", attributes_count);
     printf("Number of attributes / number of nodes: %.2f\n", (float) attributes_count / doc->node_count);
     printf("Input length: %zu bytes\n", strlen(doc->html));
@@ -72,32 +72,30 @@ static char * read_test_file()
 
 static void test_extract_charset()
 {
-    unsigned char html[] = "<meta content = 'text/html; charset=&quot;iso-8859-1\"' http-equiv='CONtent-typ&#69;'>";
+    char html[] = "<meta content = 'text/html; charset=&quot;iso-8859-1\"' http-equiv='CONtent-typ&#69;'>";
     struct String charset = HtmlDocument_extract_charset(html);
     if (charset.data == NULL) {
         printf("The document has no meta charset\n");
         return;
     }
-    printf("Charset: %.*s\n", charset.length, charset.data);
+    printf("Charset: %.*s\n", (int) charset.length, charset.data);
 }
 
 static void benchmark()
 {
     const char *html = read_test_file();
-    int i;
     struct timespec start, end;
     struct HtmlDocument *doc;
     doc = HtmlDocument(html, strlen(html));
-    //HtmlDocument_print_stats(doc);
+    HtmlDocument_print_stats(doc);
     //HtmlDocument_dump(doc); return;
     //puts(HtmlDocument_get_outer_html(doc, 0, false).data);
     //return;
-    int node = 0;
     clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &start);
-    for (i = 0; i < 200; ++i) {
-        string_free(HtmlDocument_get_outer_html(doc, 0));
+    int_fast8_t i;
+    for (i = 0; i < 20; ++i) {
+        String_free(HtmlDocument_get_outer_html(doc, 0));
     }
-    printf("%d\n", node);
     HtmlDocument_free(doc);
     clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &end);
 
@@ -113,6 +111,7 @@ static void test_resolve_iri()
         struct String relative;
         struct String target;
     } test_cases[] = {
+        {STRING("http://host:"), STRING(""), STRING("http://host/")},
         {STRING("http://datenbörse.net"), STRING(""), STRING("http://xn--datenbrse-57a.net/")},
         {STRING("/%p%p"), STRING(""), STRING("/%p%p")},
         {base, base, base}, // Asserting that there is no endless loop if `reference == base`
@@ -179,10 +178,10 @@ static void test_resolve_iri()
         if (target.length != test_cases[i].target.length ||
             strncmp(target.data, test_cases[i].target.data, target.length))
         {
-            printf("%.*s != %.*s\n", target.length, target.data,
-                    test_cases[i].target.length, test_cases[i].target.data);
+            printf("%.*s != %.*s\n", (int) target.length, target.data,
+                   (int) test_cases[i].target.length, test_cases[i].target.data);
         }
-        string_free(target);
+        String_free(target);
     }
 }
 
@@ -214,7 +213,7 @@ static void test_outer_html()
         {"<script><a>&auml;", "<html><head><script><a>&auml;</script></head></html>"},
         {"<title>a", "<html><head><title>a</title></head></html>"},
     };
-    for (int i = 0; i < sizeof test_cases / sizeof *test_cases; ++i) {
+    for (size_t i = 0; i < sizeof test_cases / sizeof *test_cases; ++i) {
         struct HtmlDocument *doc = HtmlDocument(test_cases[i].input, strlen(test_cases[i].input));
         if (doc == NULL) {
             printf("OOM\n");
@@ -223,7 +222,7 @@ static void test_outer_html()
         struct String outer_html = HtmlDocument_get_outer_html(doc, 0);
         if (strncmp(test_cases[i].outer_html, outer_html.data, outer_html.length)) {
             printf("Input: %s\nExpected output:\n%s\nActual output:\n%.*s\n\n",
-                   test_cases[i].input, test_cases[i].outer_html, outer_html.length, outer_html.data);
+                   test_cases[i].input, test_cases[i].outer_html, (int) outer_html.length, outer_html.data);
             HtmlDocument_dump(doc);
         }
         HtmlDocument_free(doc);
@@ -232,9 +231,9 @@ static void test_outer_html()
 
 int main()
 {
-    //test_outer_html();
+    test_outer_html();
+    test_resolve_iri();
     //benchmark();
     //test_extract_charset();
-    test_resolve_iri();
     return 0;
 }

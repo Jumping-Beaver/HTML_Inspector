@@ -54,7 +54,7 @@ ZEND_FUNCTION(resolve_iri)
         return;
     }
     ZVAL_STRINGL(return_value, uri.data, uri.length);
-    string_free(uri);
+    String_free(uri);
 }
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO(arginfo_resolve_iri, IS_STRING, true)
     ZEND_ARG_TYPE_INFO(0, reference, IS_STRING, false)
@@ -74,7 +74,7 @@ ZEND_METHOD(HtmlDocument, extract_charset)
         return;
     }
     ZVAL_STRINGL(return_value, charset.data, charset.length);
-    string_free(charset);
+    String_free(charset);
 }
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO(arginfo_extract_charset, IS_STRING, true)
     ZEND_ARG_TYPE_INFO(0, html, IS_STRING, false)
@@ -115,7 +115,7 @@ ZEND_METHOD(HtmlDocument, get_name)
         return;
     }
     ZVAL_STRINGL(return_value, string.data, string.length);
-    string_free(string);
+    String_free(string);
 }
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO(arginfo_get_name, IS_STRING, true)
     ZEND_ARG_TYPE_INFO(0, node, IS_LONG, false)
@@ -133,7 +133,7 @@ ZEND_METHOD(HtmlDocument, get_value)
         return;
     }
     ZVAL_STRINGL(return_value, string.data, string.length);
-    string_free(string);
+    String_free(string);
 }
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO(arginfo_get_value, IS_STRING, true)
     ZEND_ARG_TYPE_INFO(0, node, IS_LONG, false)
@@ -154,7 +154,7 @@ ZEND_METHOD(HtmlDocument, get_attribute)
         return;
     }
     ZVAL_STRINGL(return_value, string.data, string.length);
-    string_free(string);
+    String_free(string);
 }
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO(arginfo_get_attribute, IS_STRING, true)
     ZEND_ARG_TYPE_INFO(0, node, IS_LONG, false)
@@ -173,7 +173,7 @@ ZEND_METHOD(HtmlDocument, get_inner_html)
         return;
     }
     ZVAL_STRINGL(return_value, string.data, string.length);
-    string_free(string);
+    String_free(string);
 }
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO(arginfo_get_inner_html, IS_STRING, true)
     ZEND_ARG_TYPE_INFO(0, node, IS_LONG, false)
@@ -191,7 +191,7 @@ ZEND_METHOD(HtmlDocument, get_outer_html)
         return;
     }
     ZVAL_STRINGL(return_value, string.data, string.length);
-    string_free(string);
+    String_free(string);
 }
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO(arginfo_get_outer_html, IS_STRING, true)
     ZEND_ARG_TYPE_INFO(0, node, IS_LONG, false)

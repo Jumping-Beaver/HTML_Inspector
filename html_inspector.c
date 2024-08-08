@@ -1,11 +1,15 @@
 #include <stdio.h>
+#include <ctype.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <stddef.h>
 #include <stdbool.h>
-#include <ctype.h>
 
-static const unsigned char *ENTITIES[256] = {
+/*****************************************************************************/
+/* Helpers need by both `HtmlDocument` and `Selector` */
+
+static const char *ENTITIES[1 + (unsigned char) -1] = {
     ['A'] =
     "&AElig;Æ&AMP;&&Aacute;Á&Abreve;Ă&Acirc;Â&Acy;А&Afr;𝔄&Agrave;À&Alpha;Α&Amacr;Ā&And;⩓&Aogon;Ą"
     "&Aopf;𝔸&ApplyFunction;⁡&Aring;Å&Ascr;𝒜&Assign;≔&Atilde;Ã&Auml;Ä",
@@ -318,14 +322,14 @@ static const unsigned char *ENTITIES[256] = {
 // A char mask improves the performance of character comparison by reducing the number of checked conditions.
 // We must use `unsigned char *` for input because the mask is only defined for non-negative indexes.
 
-static const char CHARMASK_WHITESPACE[256] = {
+static const char CHARMASK_WHITESPACE[1 + (unsigned char) -1] = {
     [ ' '] = 1,
     ['\n'] = 1,
     ['\t'] = 1,
     ['\r'] = 1,
 };
 
-static const char CHARMASK_ATTRIBUTE_NAME_END[256] = {
+static const char CHARMASK_ATTRIBUTE_NAME_END[1 + (unsigned char) -1] = {
     [ '='] = 1,
     ['\0'] = 1,
     [ ' '] = 1,
@@ -335,7 +339,7 @@ static const char CHARMASK_ATTRIBUTE_NAME_END[256] = {
     [ '>'] = 1,
 };
 
-static const char CHARMASK_ATTRIBUTE_VALUE_END[256] = {
+static const char CHARMASK_ATTRIBUTE_VALUE_END[1 + (unsigned char) -1] = {
     [ ' '] = 1,
     ['\n'] = 1,
     ['\t'] = 1,
@@ -344,10 +348,10 @@ static const char CHARMASK_ATTRIBUTE_VALUE_END[256] = {
     ['\0'] = 1,
 };
 
-// https://dev.w3.org/html5/spec-LC/syntax.html#syntax-tag-name
-// The `–` for custom elements is yet to be incorporated into this standard.
+static const char CHARMASK_VALID_TAG_NAME_START[1 + (unsigned char) -1] = {
+    // https://dev.w3.org/html5/spec-LC/syntax.html#syntax-tag-name
+    // The `–` for custom elements is yet to be incorporated into this standard.
 
-static const char CHARMASK_VALID_TAG_NAME_START[256] = {
     ['a'] = 1, ['b'] = 1, ['c'] = 1, ['d'] = 1, ['e'] = 1, ['f'] = 1, ['g'] = 1, ['h'] = 1,
     ['i'] = 1, ['j'] = 1, ['k'] = 1, ['l'] = 1, ['m'] = 1, ['n'] = 1, ['o'] = 1, ['p'] = 1,
     ['q'] = 1, ['r'] = 1, ['s'] = 1, ['t'] = 1, ['u'] = 1, ['v'] = 1, ['w'] = 1, ['x'] = 1,
@@ -359,7 +363,7 @@ static const char CHARMASK_VALID_TAG_NAME_START[256] = {
     ['Y'] = 1, ['Z'] = 1,
 };
 
-static const char CHARMASK_VALID_TAG_NAME[256] = {
+static const char CHARMASK_VALID_TAG_NAME[1 + (unsigned char) -1] = {
     ['a'] = 1, ['b'] = 1, ['c'] = 1, ['d'] = 1, ['e'] = 1, ['f'] = 1, ['g'] = 1, ['h'] = 1,
     ['i'] = 1, ['j'] = 1, ['k'] = 1, ['l'] = 1, ['m'] = 1, ['n'] = 1, ['o'] = 1, ['p'] = 1,
     ['q'] = 1, ['r'] = 1, ['s'] = 1, ['t'] = 1, ['u'] = 1, ['v'] = 1, ['w'] = 1, ['x'] = 1,
@@ -377,7 +381,7 @@ static const char CHARMASK_VALID_TAG_NAME[256] = {
 };
 
 struct String {
-    unsigned char *data;
+    char *data;
     size_t length;
     bool is_malloced;
 };
@@ -385,17 +389,24 @@ struct String {
 #define STRING(cstring) (struct String) {cstring, sizeof cstring - 1, 0}
 #define NULL_STRING (struct String) {NULL, 0, false}
 
-static size_t entities_to_utf8(const unsigned char *input, size_t input_length, unsigned char *output,
+void String_free(struct String string)
+{
+    if (string.is_malloced && string.data != NULL) {
+        free(string.data);
+    }
+}
+
+static size_t entities_to_utf8(const char *input, size_t input_length, char *output,
     bool skip_stray_tags)
 {
     // When using this function we make use of the fact that the number of bytes written to output
     // is never greater than `input_length`.
 
     size_t i = 0, k;
-    const unsigned char *original_output = output;
+    const char *original_output = output;
     for (i = 0; i < input_length; ++i) {
         if (skip_stray_tags && input[i] == '<' && i + 1 < input_length &&
-            (input[i + 1] == '/' || CHARMASK_VALID_TAG_NAME_START[input[i + 1]]))
+            (input[i + 1] == '/' || CHARMASK_VALID_TAG_NAME_START[(unsigned char) input[i + 1]]))
         {
             do {
                 i += 1;
@@ -407,7 +418,7 @@ static size_t entities_to_utf8(const unsigned char *input, size_t input_length, 
             continue;
         }
         if (input[i + 1] == '#') {
-            int codepoint = 0;
+            uint_fast32_t codepoint = 0;
             if (input[i + 2] == 'x') {
                 for (k = 3; input[i + k] != ';'; ++k) {
                     if (input[i + k] >= '0' && input[i + k] <= '9') {
@@ -436,7 +447,7 @@ static size_t entities_to_utf8(const unsigned char *input, size_t input_length, 
                     }
                 }
             }
-            if (codepoint < 0 || codepoint > 0x7FFFFFFF) {
+            if (codepoint > 0x7FFFFFFF) {
                 *output++ = '&';
                 continue;
             }
@@ -479,11 +490,11 @@ static size_t entities_to_utf8(const unsigned char *input, size_t input_length, 
             }
             continue;
         }
-        if (i + 1 == input_length || ENTITIES[input[i + 1]] == NULL) {
+        if (i + 1 == input_length || ENTITIES[(unsigned char) input[i + 1]] == NULL) {
             *output++ = '&';
             continue;
         }
-        unsigned char entity[40] = {'&'};
+        char entity[40] = {'&'};
         k = 1;
         do {
             if (k == sizeof entity - 1 || i + k == input_length) {
@@ -496,7 +507,7 @@ static size_t entities_to_utf8(const unsigned char *input, size_t input_length, 
             continue;
         }
         entity[k] = '\0';
-        const unsigned char *pos = strstr(ENTITIES[entity[1]], entity);
+        const char *pos = strstr(ENTITIES[(unsigned char) entity[1]], entity);
         if (pos == NULL) {
             *output++ = '&';
             continue;
@@ -517,12 +528,12 @@ static struct String entities_to_utf8_malloc(const char *input, size_t length, b
     if (length == 0) {
         return (struct String) {"", 0, false};
     }
-    unsigned char *buffer = malloc(length);
+    char *buffer = malloc(length);
     if (buffer == NULL) {
         return NULL_STRING;
     }
     size_t buffer_length = entities_to_utf8(input, length, buffer, skip_stray_tags);
-    unsigned char *buffer_realloc = realloc(buffer, buffer_length);
+    char *buffer_realloc = realloc(buffer, buffer_length);
     if (buffer_realloc == NULL) {
         free(buffer);
         return NULL_STRING;
@@ -531,16 +542,9 @@ static struct String entities_to_utf8_malloc(const char *input, size_t length, b
 
 }
 
-void string_free(struct String string)
+static int_fast16_t strnicmp(const char *s1, const char *s2, size_t length)
 {
-    if (string.is_malloced && string.data != NULL) {
-        free(string.data);
-    }
-}
-
-static int strnicmp(const char *s1, const char *s2, size_t length)
-{
-    int diff = 0;
+    int_fast16_t diff = 0;
     while (length--) {
         if (diff = *s1 - *s2) {
             if ((unsigned char) (*s1 - 'A') <= 'Z' - 'A') {
@@ -563,27 +567,20 @@ static int strnicmp(const char *s1, const char *s2, size_t length)
 }
 
 /*****************************************************************************/
+/* Data types */
 
 struct HtmlDocument {
-    // Used to store decoded values in the selector filter. This enables to avoid `malloc` calls in
-    // `Selector_filter`, which has no big effect on performance, but rather serves to avoid the
-    // need for error handling. Otherwise we would need to check for errors after *every* selector
-    // iteration.
-    // However, get_name, get_attribute also use malloc. Alternatively, on error we could set a
-    // has_malloc_error flag; if set, the whole extraction result shall be discarded.
+    // According to benchmarks, cache locality is very important in the nodes array but not in the
+    // attributes array. The node struct size must be as small as possible.
 
-    // Struct alignment & performance: There is a trade-off between cache locality and having
-    // members aligned to the word size. Accessing non-aligned struct members is slower. In the
-    // attributes array, cache locality is less relevant than in the nodes array.
-
-    const unsigned char *html;
-    unsigned int node_count;
+    const char *html;
+    size_t node_count;
     struct Node {
-        const unsigned char *content; // Contains element name or text node content
-        unsigned int content_length;
-        unsigned int attributes;
-        unsigned short nesting_level;
-        unsigned short attributes_count;
+        const char *content; // Contains element name or text node content
+        size_t content_length;
+        size_t attributes;
+        size_t nesting_level;
+        size_t attributes_count;
         enum NodeType {
             NODE_TYPE_DOCUMENT,
             NODE_TYPE_COMMENT,
@@ -593,22 +590,26 @@ struct HtmlDocument {
             NODE_TYPE_CDATA,
             NODE_TYPE_VOID_ELEMENT,
             NODE_TYPE_NONVOID_ELEMENT,
-        } type;
-    } *nodes;
+        } __attribute__((packed)) type;
+    } __attribute__((packed)) *nodes;
     struct Attribute {
-        const unsigned char *name;
-        const unsigned char *value;
+        const char *name;
+        const char *value;
         size_t name_length;
         size_t value_length;
     } *attributes;
     size_t html_strlen;
-    unsigned char *largest_value_buffer;
+
+    // Used to store decoded values in the selector filter. This enables to avoid `malloc` calls in
+    // `Selector_filter`.
+
+    char *largest_value_buffer;
+
     bool has_malloc_error;
 };
 
-static const int POSITION_NOT_STARTED = -1;
-static const int POSITION_EXHAUSTED = -2;
-static const int POSITION_IS_FILTER = -3;
+static const ptrdiff_t POSITION_NOT_STARTED = -1;
+static const ptrdiff_t POSITION_EXHAUSTED = -2;
 
 enum SelectorItemType {
     AXIS_CHILD,
@@ -636,12 +637,12 @@ enum SelectorItemType {
 struct Selector {
     struct HtmlDocument *doc;
     struct Node *reference_node;
-    unsigned int active_axis;
+    int_fast8_t active_axis;
     struct SelectorItem {
         union {
             struct {
-                signed int position;
-                unsigned int axis_n;
+                ptrdiff_t position;
+                size_t axis_n;
             };
             struct {
                 const void *arg1;
@@ -655,11 +656,12 @@ struct Selector {
 };
 
 /*****************************************************************************/
+/* `HtmlDocument` */
 
-static bool parse_attribute(struct Attribute *attribute, const unsigned char **html_ptr)
+static bool parse_attribute(struct Attribute *attribute, const char **html_ptr)
 {
     const char *html = *html_ptr;
-    while (CHARMASK_WHITESPACE[*html]) {
+    while (CHARMASK_WHITESPACE[(unsigned char) *html]) {
         html += 1;
     }
     if (*html == '>' || *html == '\0' || *html == '/' && html[1] == '>') {
@@ -672,8 +674,8 @@ static bool parse_attribute(struct Attribute *attribute, const unsigned char **h
     do {
         attribute->name_length += 1;
         html += 1;
-    } while (CHARMASK_ATTRIBUTE_NAME_END[*html] == 0);
-    while (CHARMASK_WHITESPACE[*html]) {
+    } while (CHARMASK_ATTRIBUTE_NAME_END[(unsigned char) *html] == 0);
+    while (CHARMASK_WHITESPACE[(unsigned char) *html]) {
         html += 1;
     }
     if (*html != '=') {
@@ -683,27 +685,27 @@ static bool parse_attribute(struct Attribute *attribute, const unsigned char **h
     }
     do {
         html += 1;
-    } while (CHARMASK_WHITESPACE[*html]);
+    } while (CHARMASK_WHITESPACE[(unsigned char) *html]);
     if (*html == '"' || *html == '\'') {
-        char quot = *html;
+        char quote = *html;
         html += 1;
         attribute->value = html;
-        while (*html != '\0' && *html != quot) {
+        while (*html != '\0' && *html != quote) {
             attribute->value_length += 1;
             html += 1;
         }
-        if (*html == quot) {
+        if (*html == quote) {
             html += 1;
         }
     }
     else {
         attribute->value = html;
-        while (CHARMASK_ATTRIBUTE_VALUE_END[*html] == 0) {
+        while (CHARMASK_ATTRIBUTE_VALUE_END[(unsigned char) *html] == 0) {
             attribute->value_length += 1;
             html += 1;
         }
     }
-    while (CHARMASK_WHITESPACE[*html]) {
+    while (CHARMASK_WHITESPACE[(unsigned char) *html]) {
         html += 1;
     }
     *html_ptr = html;
@@ -712,9 +714,8 @@ static bool parse_attribute(struct Attribute *attribute, const unsigned char **h
 
 #define CHARSEQICMP(s1, length, s2) (length != sizeof s2 - 1 || strnicmp(s1, s2, length))
 
-struct String HtmlDocument_extract_charset(const unsigned char *html)
+struct String HtmlDocument_extract_charset(const char *html)
 {
-    const unsigned char *html_start = html;
     while (true) {
         if (*html == '\0') {
             break;
@@ -742,8 +743,8 @@ struct String HtmlDocument_extract_charset(const unsigned char *html)
         if (*html == '<') {
             html += 1;
             const char *name = html;
-            int name_length = 0;
-            while (CHARMASK_VALID_TAG_NAME[html[name_length]] == 0) {
+            size_t name_length = 0;
+            while (CHARMASK_VALID_TAG_NAME[(unsigned char) html[name_length]] == 0) {
                 name_length += 1;
             }
             if (!CHARSEQICMP(name, name_length, "script") ||
@@ -777,7 +778,7 @@ struct String HtmlDocument_extract_charset(const unsigned char *html)
                 return entities_to_utf8_malloc(attr.value, attr.value_length, false);
             }
             if (!strnicmp(attr.name, "content", attr.name_length)) {
-                content = (unsigned char *) attr.value;
+                content = (char *) attr.value;
                 content_length = attr.value_length;
             }
             else if (!strnicmp(attr.name, "http-equiv", attr.name_length)) {
@@ -787,34 +788,34 @@ struct String HtmlDocument_extract_charset(const unsigned char *html)
                 if (!strnicmp(buffer.data, "content-type", buffer.length)) {
                     has_http_equiv_content_type = true;
                 }
-                string_free(buffer);
+                String_free(buffer);
             }
         }
         if (has_http_equiv_content_type && content != NULL) {
-            unsigned char *buffer = malloc(content_length);
+            char *buffer = malloc(content_length);
             if (buffer == NULL) {
                 return NULL_STRING;
             }
             content_length = entities_to_utf8(content, content_length, buffer, false);
             content = buffer;
 
-            int charset_begin = 0, charset_length = 0;
+            size_t charset_begin = 0, charset_length = 0;
             for (; charset_begin < content_length; ++charset_begin) {
                 if (content[charset_begin] != ';') {
                     continue;
                 }
                 do {
                     charset_begin += 1;
-                } while (CHARMASK_WHITESPACE[content[charset_begin]]);
+                } while (CHARMASK_WHITESPACE[(unsigned char) content[charset_begin]]);
                 if (strncmp(&content[charset_begin], "charset", sizeof "charset" - 1)) {
                     continue;
                 }
-                char charset_delim = content[charset_begin + sizeof "charset" - 1];
-                if (charset_delim != '=' && !CHARMASK_WHITESPACE[charset_delim]) {
+                unsigned char charset_delim = content[charset_begin + sizeof "charset" - 1];
+                if (charset_delim != '=' && !CHARMASK_WHITESPACE[(unsigned char) charset_delim]) {
                     continue;
                 }
                 charset_begin += sizeof "charset" - 1;
-                while (CHARMASK_WHITESPACE[content[charset_begin]]) {
+                while (CHARMASK_WHITESPACE[(unsigned char) content[charset_begin]]) {
                     charset_begin += 1;
                 }
                 if (content[charset_begin] != '=') {
@@ -822,14 +823,14 @@ struct String HtmlDocument_extract_charset(const unsigned char *html)
                 }
                 do {
                     charset_begin += 1;
-                } while (CHARMASK_WHITESPACE[content[charset_begin]]);
+                } while (CHARMASK_WHITESPACE[(unsigned char) content[charset_begin]]);
                 if (content[charset_begin] == '"') {
                     // Quotes around charset are valid: https://www.ietf.org/rfc/rfc2045.txt
                     charset_begin += 1;
                 }
                 while (
                     charset_begin + charset_length < content_length &&
-                    !CHARMASK_WHITESPACE[content[charset_begin + charset_length]] &&
+                    !CHARMASK_WHITESPACE[(unsigned char) content[charset_begin + charset_length]] &&
                     content[charset_begin + charset_length] != ';'&&
                     content[charset_begin + charset_length] != '"'
                 ) {
@@ -862,7 +863,7 @@ void HtmlDocument_free(struct HtmlDocument *doc)
     free(doc);
 }
 
-static struct HtmlDocument * HtmlDocument(const unsigned char *html, size_t html_strlen)
+static struct HtmlDocument * HtmlDocument(const char *html, size_t html_strlen)
 {
     // Minimizing the number of `realloc` calls is essential to achieve the best performance. We
     // use heuristic starting values depending on the input length. `strlen` is very fast.
@@ -889,9 +890,9 @@ static struct HtmlDocument * HtmlDocument(const unsigned char *html, size_t html
     }
 
     // We cannot use `struct Node *` pointers because `realloc` may break them
-    unsigned short unclosed_elements_size = 0;
-    unsigned short unclosed_elements_capacity = 100;
-    int *unclosed_elements = malloc(unclosed_elements_capacity * sizeof *unclosed_elements);
+    size_t unclosed_elements_size = 0;
+    size_t unclosed_elements_capacity = 100;
+    size_t *unclosed_elements = malloc(unclosed_elements_capacity * sizeof *unclosed_elements);
     if (unclosed_elements == NULL) {
         free(doc->nodes);
         free(doc);
@@ -900,7 +901,7 @@ static struct HtmlDocument * HtmlDocument(const unsigned char *html, size_t html
     #define INCREMENT_UNCLOSED_ELEMENTS_SIZE() \
         if (++unclosed_elements_size == unclosed_elements_capacity - 1) { \
             unclosed_elements_capacity += 100; \
-            int *new_unclosed_elements = realloc(unclosed_elements, \
+            size_t *new_unclosed_elements = realloc(unclosed_elements, \
                 unclosed_elements_capacity * sizeof *unclosed_elements); \
             if (new_unclosed_elements == NULL) { \
                 free(unclosed_elements); \
@@ -913,7 +914,6 @@ static struct HtmlDocument * HtmlDocument(const unsigned char *html, size_t html
     doc->nodes[0] = (struct Node) {
         .content = "#document",
         .content_length = sizeof "#document" - 1,
-        .attributes_count = 0,
         .type = NODE_TYPE_DOCUMENT
     };
     doc->node_count = 1;
@@ -922,8 +922,8 @@ static struct HtmlDocument * HtmlDocument(const unsigned char *html, size_t html
     doc->largest_value_buffer = NULL;
     doc->has_malloc_error = false;
 
-    int attributes_count = 0;
-    int html_node = -1, head_node = -1, body_node = -1, tbody_node = -2, colgroup_node = -1;
+    size_t attributes_count = 0;
+    ptrdiff_t html_node = -1, head_node = -1, body_node = -1, tbody_node = -2, colgroup_node = -1;
 
     // Optimized standard library functions such as strchr and strpbrk traverse the string word for
     // word and not byte for byte. But called in a loop, they are slower because of the overhead of
@@ -931,7 +931,7 @@ static struct HtmlDocument * HtmlDocument(const unsigned char *html, size_t html
 
     #define INCREMENT_NODE_COUNT() \
         if (++doc->node_count == nodes_capacity - 1) { \
-            nodes_capacity = 1 + (int) (nodes_capacity * 1.2); \
+            nodes_capacity = 1 + (size_t) (nodes_capacity * 1.2); \
             struct Node *new_nodes = realloc(doc->nodes, nodes_capacity * sizeof *new_nodes); \
             if (new_nodes == NULL) { \
                 free(unclosed_elements); \
@@ -943,11 +943,11 @@ static struct HtmlDocument * HtmlDocument(const unsigned char *html, size_t html
 
     size_t largest_value_length = 0;
     while (true) {
-        int text_node_length = 0;
+        size_t text_node_length = 0;
         bool has_only_whitespace = true;
         if (*html == '<') {
             if (html[1] == '!') {
-                const unsigned char *comment;
+                const char *comment;
                 size_t comment_length;
                 if (html[2] == '-' && html[3] == '-') {
                     html += 4;
@@ -977,9 +977,9 @@ static struct HtmlDocument * HtmlDocument(const unsigned char *html, size_t html
             }
             else if (html[1] == '/') {
                 html += 2;
-                if (!CHARMASK_VALID_TAG_NAME_START[*html]) {
+                if (!CHARMASK_VALID_TAG_NAME_START[(unsigned char) *html]) {
                     // Handling `invalid-first-character-of-tag-name` of the W3C standard
-                    const unsigned char *comment = html;
+                    const char *comment = html;
                     while (*html != '>' && *html != '\0') {
                         html += 1;
                     }
@@ -993,15 +993,15 @@ static struct HtmlDocument * HtmlDocument(const unsigned char *html, size_t html
                     html += (*html != '\0');
                     continue;
                 }
-                int name_length = 0;
-                while (CHARMASK_VALID_TAG_NAME[html[name_length]]) {
+                size_t name_length = 0;
+                while (CHARMASK_VALID_TAG_NAME[(unsigned char) html[name_length]]) {
                     name_length += 1;
                 }
 
                 bool has_found_node = false;
                 struct Node *node;
-                int k;
-                for (k = unclosed_elements_size - 1; k >= 0; --k) {
+                size_t k = unclosed_elements_size;
+                while (k-- > 0) {
                     node = &doc->nodes[unclosed_elements[k]];
                     if (name_length == node->content_length && !strnicmp(node->content, html, name_length)) {
                         has_found_node = true;
@@ -1016,9 +1016,9 @@ static struct HtmlDocument * HtmlDocument(const unsigned char *html, size_t html
                     // text ← indent_width = 2
                     // <c>  ← indent_width = 2
                     // </a>
-                    int indent_width = unclosed_elements_size - k;
-                    bool b;
-                    for (int node_index = doc->node_count - 1; node_index >= unclosed_elements[k]; --node_index) {
+                    size_t indent_width = unclosed_elements_size - k;
+                    size_t node_index = doc->node_count;
+                    while (node_index-- > unclosed_elements[k]) {
                         if (node_index == unclosed_elements[unclosed_elements_size - 1]) {
                             unclosed_elements_size -= 1;
                             indent_width -= 1;
@@ -1049,16 +1049,16 @@ static struct HtmlDocument * HtmlDocument(const unsigned char *html, size_t html
                 }
                 node->content_length = html - node->content;
             }
-            else if (CHARMASK_VALID_TAG_NAME_START[html[1]]) {
+            else if (CHARMASK_VALID_TAG_NAME_START[(unsigned char) html[1]]) {
                 // Here we analyse a start tag. We use a loop to add nodes because we may need
                 // to consider one or multiple optional start tags that are not encoded.
 
                 html += 1;
                 const char *name = html;
-                unsigned short name_length = 0;
-                unsigned int new_attributes_count = attributes_count;
+                size_t name_length = 0;
+                size_t new_attributes_count = attributes_count;
 
-                while (CHARMASK_VALID_TAG_NAME[html[name_length]]) {
+                while (CHARMASK_VALID_TAG_NAME[(unsigned char) html[name_length]]) {
                     name_length += 1;
                 }
                 html += name_length;
@@ -1193,7 +1193,7 @@ static struct HtmlDocument * HtmlDocument(const unsigned char *html, size_t html
                     added_node.nesting_level = 1;
                     added_node.type = NODE_TYPE_UNCLOSED_ELEMENT;
 
-                    // Using long if confitions is much faster than looping through data tables
+                    // Using long if conditions is much faster than looping through data tables
                     // for the following tag-specific logic.
 
                     // Void elements
@@ -1369,7 +1369,7 @@ static struct HtmlDocument * HtmlDocument(const unsigned char *html, size_t html
 
         if (type == NODE_TYPE_TEXT) {
             while (html[text_node_length] != '<' && html[text_node_length] != '\0') {
-                has_only_whitespace &= CHARMASK_WHITESPACE[html[text_node_length]];
+                has_only_whitespace &= CHARMASK_WHITESPACE[(unsigned char) html[text_node_length]];
                 text_node_length += 1;
             }
             if (node->type == NODE_TYPE_TEXT) {
@@ -1410,7 +1410,7 @@ static struct HtmlDocument * HtmlDocument(const unsigned char *html, size_t html
             }
             else {
                 doc->nodes[head_node].type = NODE_TYPE_NONVOID_ELEMENT;
-                for (int i = head_node + 1; i < doc->node_count - 1; ++i) {
+                for (size_t i = head_node + 1; i < doc->node_count - 1; ++i) {
                     doc->nodes[i].nesting_level += 1;
                 }
                 while (unclosed_elements[unclosed_elements_size - 1] != head_node) {
@@ -1474,7 +1474,7 @@ static struct HtmlDocument * HtmlDocument(const unsigned char *html, size_t html
     return doc;
 }
 
-struct String HtmlDocument_get_name(struct HtmlDocument *doc, int node)
+struct String HtmlDocument_get_name(struct HtmlDocument *doc, ptrdiff_t node)
 {
     if (node < 0 || node >= doc->node_count) {
         return NULL_STRING;
@@ -1490,20 +1490,20 @@ struct String HtmlDocument_get_name(struct HtmlDocument *doc, int node)
         doc->has_malloc_error = true;
         return NULL_STRING;
     }
-    for (int i = 0; i < doc->nodes[node].content_length; ++i) {
+    for (size_t i = 0; i < doc->nodes[node].content_length; ++i) {
         name[i] = tolower(doc->nodes[node].content[i]);
     }
     return (struct String) {name, doc->nodes[node].content_length, true};
 }
 
-struct String HtmlDocument_get_value(struct HtmlDocument *doc, int node)
+struct String HtmlDocument_get_value(struct HtmlDocument *doc, ptrdiff_t node)
 {
     if (node < 0 || node >= doc->node_count) {
         return NULL_STRING;
     }
     struct Node *n = &doc->nodes[node];
     if (n->type == NODE_TYPE_CDATA || n->type == NODE_TYPE_COMMENT) {
-        return (struct String) {(unsigned char *) n->content, n->content_length, false};
+        return (struct String) {(char *) n->content, n->content_length, false};
     }
     if (n->type == NODE_TYPE_TEXT) {
         struct String result = entities_to_utf8_malloc(n->content, n->content_length, true);
@@ -1515,14 +1515,14 @@ struct String HtmlDocument_get_value(struct HtmlDocument *doc, int node)
     return NULL_STRING;
 }
 
-struct String HtmlDocument_get_attribute(struct HtmlDocument *doc, int node, const char *attribute)
+struct String HtmlDocument_get_attribute(struct HtmlDocument *doc, ptrdiff_t node, const char *attribute)
 {
     if (node < 0 || node >= doc->node_count) {
         return NULL_STRING;
     }
     size_t strlen_attribute = strlen(attribute);
     struct Attribute *attributes = &doc->attributes[doc->nodes[node].attributes];
-    for (int i = 0; i < doc->nodes[node].attributes_count; ++i) {
+    for (size_t i = 0; i < doc->nodes[node].attributes_count; ++i) {
         if (attributes[i].name_length == strlen_attribute &&
             !strnicmp(attributes[i].name, attribute, attributes[i].name_length))
         {
@@ -1537,7 +1537,7 @@ struct String HtmlDocument_get_attribute(struct HtmlDocument *doc, int node, con
     return NULL_STRING;
 }
 
-static size_t get_escape_length(const unsigned char *html, size_t length, bool is_attribute)
+static size_t get_escape_length(const char *html, size_t length, bool is_attribute)
 {
     size_t escape_length = length, i = length;
     while (i-- > 0) {
@@ -1561,8 +1561,7 @@ static size_t get_escape_length(const unsigned char *html, size_t length, bool i
     return escape_length;
 }
 
-static void escape_inplace(unsigned char *input, size_t input_length, size_t escape_length,
-    bool is_attribute)
+static void escape_inplace(char *input, size_t input_length, size_t escape_length, bool is_attribute)
 {
     // We exploit the fact that the escaped string will never be smaller than
     // the input. This makes it possible to rewrite the input in-place from its end.
@@ -1618,7 +1617,7 @@ static void escape_inplace(unsigned char *input, size_t input_length, size_t esc
     }
 }
 
-struct String HtmlDocument_get_html(struct HtmlDocument *doc, int node, bool inner)
+struct String HtmlDocument_get_html(struct HtmlDocument *doc, ptrdiff_t node, bool inner)
 {
     // https://dev.w3.org/html5/spec-LC/the-end.html#html-fragment-serialization-algorithm
     //
@@ -1686,13 +1685,12 @@ struct String HtmlDocument_get_html(struct HtmlDocument *doc, int node, bool inn
         else {
             EXTEND(1 + n->content_length + 1);
             result.data[result.length++] = '<';
-            for (int i = 0; i < n->content_length; ++i) {
+            for (size_t i = 0; i < n->content_length; ++i) {
                 result.data[result.length++] = tolower(n->content[i]);
             }
 
             struct Attribute *attribute = &doc->attributes[n->attributes];
             while (attribute < &doc->attributes[n->attributes + n->attributes_count]) {
-
                 EXTEND(1 + attribute->name_length + 2);
                 result.data[result.length++] = ' ';
                 for (int i = 0; i < attribute->name_length; ++i) {
@@ -1717,9 +1715,9 @@ struct String HtmlDocument_get_html(struct HtmlDocument *doc, int node, bool inn
 
             result.data[result.length++] = '>';
         }
-        int preceding_nesting_level = n->nesting_level;
-        int next_nesting_level = n == last_node ||
-            (n + 1)->nesting_level <= doc->nodes[node].nesting_level - 1 ?
+        size_t preceding_nesting_level = n->nesting_level;
+        size_t next_nesting_level = n == last_node ||
+            (n + 1)->nesting_level < doc->nodes[node].nesting_level ?
             doc->nodes[node].nesting_level : (n + 1)->nesting_level;
         if (next_nesting_level <= preceding_nesting_level) {
             struct Node *counterpart = n;
@@ -1731,7 +1729,7 @@ struct String HtmlDocument_get_html(struct HtmlDocument *doc, int node, bool inn
                     EXTEND(2 + counterpart->content_length + 1);
                     result.data[result.length++] = '<';
                     result.data[result.length++] = '/';
-                    for (int i = 0; i < counterpart->content_length; ++i) {
+                    for (size_t i = 0; i < counterpart->content_length; ++i) {
                         result.data[result.length++] = tolower(counterpart->content[i]);
                     }
                     result.data[result.length++] = '>';
@@ -1747,12 +1745,12 @@ struct String HtmlDocument_get_html(struct HtmlDocument *doc, int node, bool inn
     return result;
 }
 
-struct String HtmlDocument_get_inner_html(struct HtmlDocument *doc, int node)
+struct String HtmlDocument_get_inner_html(struct HtmlDocument *doc, ptrdiff_t node)
 {
     return HtmlDocument_get_html(doc, node, true);
 }
 
-struct String HtmlDocument_get_outer_html(struct HtmlDocument *doc, int node)
+struct String HtmlDocument_get_outer_html(struct HtmlDocument *doc, ptrdiff_t node)
 {
     return HtmlDocument_get_html(doc, node, false);
 }
@@ -1768,7 +1766,7 @@ bool HtmlDocument_has_malloc_error(struct HtmlDocument *doc)
     return doc->has_malloc_error;
 }
 
-struct Selector * HtmlDocument_select(struct HtmlDocument *doc, unsigned int index)
+struct Selector * HtmlDocument_select(struct HtmlDocument *doc, size_t node)
 {
     struct Selector *s = malloc(sizeof (struct Selector));
     if (s == NULL) {
@@ -1777,18 +1775,19 @@ struct Selector * HtmlDocument_select(struct HtmlDocument *doc, unsigned int ind
     s->doc = doc;
     s->item_count = 0;
     s->active_axis = 0;
-    s->reference_node = index < doc->node_count ? doc->nodes + index : doc->nodes;
+    s->reference_node = node < doc->node_count ? &doc->nodes[node] : doc->nodes;
     return s;
 }
 
 /*****************************************************************************/
+/* `Selector` */
 
 static bool str_contains(const char *haystack, size_t haystack_length, const char *needle, bool is_word,
     bool case_i)
 {
-    int diff;
-    for (int hi = 0, ni = 0; hi < haystack_length; ++hi) {
-        if (is_word && hi > 0 && !CHARMASK_WHITESPACE[haystack[hi - 1]]) {
+    int_fast16_t diff;
+    for (size_t hi = 0, ni = 0; hi < haystack_length; ++hi) {
+        if (is_word && hi > 0 && !CHARMASK_WHITESPACE[(unsigned char) haystack[hi - 1]]) {
             continue;
         }
         if ((diff = haystack[hi] - needle[ni]) && case_i) {
@@ -1800,7 +1799,9 @@ static bool str_contains(const char *haystack, size_t haystack_length, const cha
             }
         }
         ni = (diff == 0) * (ni + 1);
-        if (needle[ni + 1] == '\0' && (!is_word || CHARMASK_WHITESPACE[haystack[hi + ni + 1]])) {
+        if (needle[ni + 1] == '\0' && (!is_word ||
+            CHARMASK_WHITESPACE[(unsigned char) haystack[hi + ni + 1]]))
+        {
             return true;
         }
     }
@@ -1850,8 +1851,8 @@ void Selector_iterate_axis(struct Selector *sel, struct SelectorItem *si, const 
         si->position = POSITION_EXHAUSTED;
     }
     else if (si->type == AXIS_ANCESTOR) {
-        int current_nesting_level = sel->doc->nodes[si->position].nesting_level;
-        while (--si->position >= 0) {
+        size_t current_nesting_level = sel->doc->nodes[si->position].nesting_level;
+        while (si->position-- > 0) {
             if (sel->doc->nodes[si->position].nesting_level < current_nesting_level) {
                 return;
             }
@@ -1885,7 +1886,7 @@ void Selector_iterate_axis(struct Selector *sel, struct SelectorItem *si, const 
     }
 }
 
-static int Selector_filter(struct Selector *sel, struct SelectorItem *si, struct Node *node)
+static bool Selector_filter(struct Selector *sel, struct SelectorItem *si, struct Node *node)
 {
     if (si->type == FILTER_NTH) {
         struct SelectorItem *axis_selector = si;
@@ -1897,7 +1898,7 @@ static int Selector_filter(struct Selector *sel, struct SelectorItem *si, struct
                 break;
             }
         }
-        return axis_selector->axis_n == (long) si->filter_data.arg1;
+        return axis_selector->axis_n == (size_t) si->filter_data.arg1;
     }
     else if (si->type == FILTER_NODE_NAME) {
         const char *name;
@@ -1932,7 +1933,7 @@ static int Selector_filter(struct Selector *sel, struct SelectorItem *si, struct
         if (si->type == FILTER_ATTRIBUTE_EXISTS) {
             return true;
         }
-        unsigned char *value = sel->doc->largest_value_buffer;
+        char *value = sel->doc->largest_value_buffer;
         size_t value_length = entities_to_utf8(attr->value, attr->value_length, value, false);
 
         bool matches = false;
@@ -1970,7 +1971,7 @@ static int Selector_filter(struct Selector *sel, struct SelectorItem *si, struct
     return false;
 }
 
-int Selector_iterate(struct Selector *sel)
+ptrdiff_t Selector_iterate(struct Selector *sel)
 {
     // The logic here relies on the refusal to push filters to selector item position 0
 
@@ -1979,8 +1980,8 @@ int Selector_iterate(struct Selector *sel)
     }
     bool bool_stack[sizeof sel->items / sizeof *sel->items];
     while (true) {
-        int preceding_axis = sel->active_axis;
-        while (--preceding_axis >= 0) {
+        int_fast8_t preceding_axis = sel->active_axis;
+        while (preceding_axis-- > 0) {
             if (sel->items[preceding_axis].type < FILTER_OR) {
                 break;
             }
@@ -2000,8 +2001,8 @@ int Selector_iterate(struct Selector *sel)
         }
 
         sel->items[sel->active_axis].axis_n += 1;
-        int filter_index = sel->active_axis;
-        signed int bool_stack_size = 0;
+        int_fast8_t filter_index = sel->active_axis;
+        int_fast8_t bool_stack_size = 0;
         while (++filter_index < sel->item_count && sel->items[filter_index].type >= FILTER_OR) {
             if (sel->items[filter_index].type == FILTER_NOT) {
                 if (bool_stack_size >= 1) {
@@ -2026,7 +2027,7 @@ int Selector_iterate(struct Selector *sel)
             }
         }
         bool filter_state = true;
-        while (--bool_stack_size >= 0) {
+        while (bool_stack_size-- > 0) {
             if (bool_stack[bool_stack_size] == false) {
                 filter_state = false;
                 break;
@@ -2071,9 +2072,9 @@ void Selector_following_sibling(struct Selector *sel)
     Selector_push_selector(sel, AXIS_FOLLOWING_SIBLING, NULL, NULL);
 }
 
-void Selector_nth(struct Selector *sel, unsigned int n)
+void Selector_nth(struct Selector *sel, size_t n)
 {
-    Selector_push_selector(sel, FILTER_NTH, (void *) (long) n, NULL);
+    Selector_push_selector(sel, FILTER_NTH, (void *) (size_t) n, NULL);
 }
 
 void Selector_name(struct Selector *sel, const char *name)
@@ -2151,38 +2152,19 @@ void Selector_reset(struct Selector *sel)
     sel->item_count = 0;
 }
 
-enum punycode_status {
-  punycode_success,
-  punycode_bad_input,   /* Input is invalid.                       */
-  punycode_big_output,  /* Output would exceed the space provided. */
-  punycode_overflow     /* Input needs wider integers to process.  */
-};
-
-#if UINT_MAX >= (1 << 26) - 1
-typedef unsigned int punycode_uint;
-#else
-typedef unsigned long punycode_uint;
-#endif
-
 /*****************************************************************************/
-/* encode_digit(d,flag) returns the basic code point whose value      */
-/* (when used for representing integers) is d, which needs to be in   */
-/* the range 0 to base-1.  The lowercase form is used unless flag is  */
-/* nonzero, in which case the uppercase form is used.  The behavior   */
-/* is undefined if flag is nonzero and digit d has no uppercase form. */
+/* IRI resolver */
 
-static char encode_digit(punycode_uint d)
+static uint_fast8_t encode_digit(uint_fast32_t d)
 {
     return d + 22 + 75 * (d < 26);
-    /*  0..25 map to ASCII a..z or A..Z */
-    /* 26..35 map to ASCII 0..9         */
 }
 
-enum { BASE = 36, TMIN = 1, TMAX = 26, SKEW = 38, DAMP = 700};
+enum {BASE = 36, TMIN = 1, TMAX = 26, SKEW = 38, DAMP = 700};
 
-static punycode_uint adapt(punycode_uint delta, punycode_uint numpoints, int firsttime)
+static uint_fast32_t adapt(uint_fast32_t delta, uint_fast32_t numpoints, bool firsttime)
 {
-    punycode_uint k;
+    uint_fast32_t k;
 
     delta = firsttime ? delta / DAMP : delta >> 1;
     delta += delta / numpoints;
@@ -2192,30 +2174,22 @@ static punycode_uint adapt(punycode_uint delta, punycode_uint numpoints, int fir
     return k + (BASE - TMIN + 1) * delta / (delta + SKEW);
 }
 
-static int from_hex(char c)
+static uint_fast8_t from_hex(char c)
 {
     if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'a' && c <= 'z') return c - 'a';
-    if (c >= 'A' && c <= 'Z') return c - 'A';
+    if (c >= 'a' && c <= 'f') return c - 'a';
+    if (c >= 'A' && c <= 'F') return c - 'A';
     return -1;
 }
 
 struct String resolve_iri(struct String reference, struct String base)
 {
-    // Resolve UTF-8 encoded IRI references and convert to ASCII-encoded URI format.
-    // The standard defines IRI resolving as the mapping to a URI followed by resolving the URI.
+    // Resolve UTF-8-encoded IRI references, convert to ASCII-encoded URI format, and normalize the URI.
     //
-    // Both input parameters are expected to have UTF-8 encoding.
-    //
-    // IRI: https://datatracker.ietf.org/doc/html/rfc3987
+    // IRI: https://www.rfc-editor.org/rfc/rfc3987
     // URI resolving: https://www.rfc-editor.org/rfc/rfc1808#section-5
-    //
-    // https://en.wikipedia.org/wiki/URI_normalization
-    // https://www.rfc-editor.org/rfc/rfc3986#section-5.2.4
-    //
-    // TODO: Convert IDNA to ASCII
 
-    int i;
+    size_t i;
     enum {
         COMPONENT_SCHEME,
         COMPONENT_AUTHORITY,
@@ -2272,7 +2246,7 @@ struct String resolve_iri(struct String reference, struct String base)
 
     // Copy the scheme from `source` to the result
 
-    int scheme_length = 0;
+    size_t scheme_length = 0;
     while (i < source.length && source.data[i] != ':') {
         APPEND(tolower(source.data[i]));
         scheme_length += 1;
@@ -2290,8 +2264,8 @@ struct String resolve_iri(struct String reference, struct String base)
         i = 0;
     }
     if (i + 1 < source.length && source.data[i] == '/' && source.data[i + 1] == '/') {
-        int authority_index = i;
-        int at_index = -1;
+        size_t authority_index = i;
+        size_t at_index = 0;
         for (i = authority_index + 2; i < source.length && source.data[i] != '/' &&
                 source.data[i] != '?' && source.data[i] != '#' && source.data[i] != ':'; ++i)
         {
@@ -2299,20 +2273,20 @@ struct String resolve_iri(struct String reference, struct String base)
                 at_index = i;
             }
         }
-        int domain_end = i;
-        int domain_start = at_index >= 0 ? at_index + 1 : authority_index + 2;
+        size_t domain_end = i;
+        size_t domain_start = at_index > 0 ? at_index + 1 : authority_index + 2;
         for (i = authority_index; i < domain_start; ++i) {
             APPEND(source.data[i]);
         }
 
         // Append domain and convert IDN to ASCII
-        // Punycode implementation see: https://datatracker.ietf.org/doc/html/rfc3492
+        // Punycode implementation: <https://datatracker.ietf.org/doc/html/rfc3492>
 
-        int domain_label_start = domain_start;
+        size_t domain_label_start = domain_start;
         while (true) {
-            uint32_t codepoints[63];
-            int num_codepoints = 0;
-            punycode_uint num_basic_codepoints = 0;
+            uint_fast32_t codepoints[63];
+            uint_fast8_t num_codepoints = 0;
+            uint_fast8_t num_basic_codepoints = 0;
             for (i = domain_label_start; i < domain_end && source.data[i] != '.'; ++i) {
                 if (i - domain_label_start >= 63) {
                     // “Each node [of the domain name space] has a label, which is zero to 63
@@ -2321,11 +2295,11 @@ struct String resolve_iri(struct String reference, struct String base)
                     free(source.data);
                     return NULL_STRING;
                 }
-                if (source.data[i] < 0b10000000) {
+                if ((unsigned char) source.data[i] < 0b10000000) {
                     codepoints[num_codepoints++] = source.data[i];
                     num_basic_codepoints++;
                 }
-                else if (source.data[i] < 0b11100000) {
+                else if ((unsigned char) source.data[i] < 0b11100000) {
                     if (i + 1 >= domain_end) {
                         return NULL_STRING;
                     }
@@ -2334,7 +2308,7 @@ struct String resolve_iri(struct String reference, struct String base)
                         (source.data[i + 1] & 0b00111111);
                     i += 1;
                 }
-                else if (source.data[i] < 0b11110000) {
+                else if ((unsigned char) source.data[i] < 0b11110000) {
                     if (i + 2 >= domain_end) {
                         return NULL_STRING;
                     }
@@ -2344,7 +2318,7 @@ struct String resolve_iri(struct String reference, struct String base)
                         (source.data[i + 2] & 0b00111111);
                     i += 2;
                 }
-                else if (source.data[i] < 0b11111000) {
+                else if ((unsigned char) source.data[i] < 0b11111000) {
                     if (i + 3 >= domain_end) {
                         return NULL_STRING;
                     }
@@ -2363,7 +2337,7 @@ struct String resolve_iri(struct String reference, struct String base)
                 APPEND('-');
             }
             for (i = domain_label_start; i < domain_end && source.data[i] != '.'; ++i) {
-                if (source.data[i] < 128) {
+                if ((unsigned char) source.data[i] < 128) {
                     APPEND(tolower(source.data[i]));
                 }
             }
@@ -2372,12 +2346,12 @@ struct String resolve_iri(struct String reference, struct String base)
                 APPEND('-');
             }
 
-            punycode_uint bias = 72;
-            punycode_uint next_codepoint, codepoint = 128;
-            punycode_uint delta = 0;
-            punycode_uint k, t;
-            punycode_uint num_handled_codepoints = num_basic_codepoints;
-            const punycode_uint MAX_INT = -1;
+            uint_fast32_t bias = 72;
+            uint_fast32_t next_codepoint, codepoint = 128;
+            uint_fast32_t delta = 0;
+            uint_fast32_t k, t;
+            uint_fast8_t num_handled_codepoints = num_basic_codepoints;
+            const uint_fast32_t MAX_INT = -1;
 
             while (num_handled_codepoints < num_codepoints) {
                 for (next_codepoint = MAX_INT, i = 0; i < num_codepoints; ++i) {
@@ -2387,19 +2361,19 @@ struct String resolve_iri(struct String reference, struct String base)
                 }
 
                 if (next_codepoint - codepoint > (MAX_INT - delta) / (num_handled_codepoints + 1)) {
+                    // PuncyCode overflow
                     free(source.data);
                     return NULL_STRING;
-                    //return punycode_overflow;
                 }
                 delta += (next_codepoint - codepoint) * (num_handled_codepoints + 1);
                 codepoint = next_codepoint;
 
-                punycode_uint q;
+                uint_fast32_t q;
                 for (i = 0; i < num_codepoints; ++i) {
                     if (codepoints[i] < codepoint && ++delta == 0) {
+                        // PunyCode overflow
                         free(source.data);
                         return NULL_STRING;
-                        //return punycode_overflow;
                     }
                     if (codepoints[i] == codepoint) {
                         for (q = delta, k = BASE;  ; k += BASE) {
@@ -2433,27 +2407,38 @@ struct String resolve_iri(struct String reference, struct String base)
         if (source.data[i] == ':') {
             do {
                 i += 1;
-            } while (source.data[i] == '0');
-            int port_i = i;
-            int port = 0;
-            while (
-                i < source.length && source.data[i] != '/' && source.data[i] != '?' &&
-                source.data[i] != '#'
-            ) {
-                char digit = source.data[i] - '0';
-                if (digit < 0 || digit > 9) {
-                    free(source.data);
-                    return NULL_STRING;
-                }
-                port = 10 * port + digit;
+            } while (i < source.length && source.data[i] == '0');
+
+            if (i + 1 < source.length && source.data[i] == '8' && source.data[i + 1] == '0' &&
+                !strncmp(normalized.data, "http", scheme_length))
+            {
+                i += 2;
+            }
+            else if (i + 2 < source.length && source.data[i] == '4' && source.data[i + 1] == '4' &&
+                source.data[i + 2] == '3' && !strncmp(normalized.data, "https", scheme_length))
+            {
+                i += 3;
+            }
+            else if (i + 1 >= source.length || source.data[i + 1] == '/' || source.data[i + 1] == '?' ||
+                source.data[i + 1] == '#')
+            {
+                // “URI producers and normalizers should omit the ":" delimiter that separates host
+                // from port if the port component is empty.”
+                // <https://www.rfc-editor.org/rfc/rfc3986#section-3.2>
+
                 i += 1;
             }
-            if ((port != 80 || strncmp(normalized.data, "http", scheme_length)) &&
-                (port != 443 || strncmp(normalized.data, "https", scheme_length)))
-            {
+            else {
                 APPEND(':');
-                for (int k = port_i; k < i; ++k) {
-                    APPEND(source.data[k]);
+                while (
+                    i < source.length && source.data[i] != '/' && source.data[i] != '?' &&
+                    source.data[i] != '#'
+                ) {
+                    if (source.data[i] < '0' || source.data[i] > '9') {
+                        free(normalized.data);
+                        return NULL_STRING;
+                    }
+                    APPEND(source.data[i++]);
                 }
             }
         }
@@ -2470,7 +2455,7 @@ struct String resolve_iri(struct String reference, struct String base)
         source = reference;
         i = 1;
     }
-    int cut_off;
+    size_t cut_off;
     if (reference_component == COMPONENT_RELATIVE_PATH) {
         cut_off = i;
         while (base.data[cut_off] != '?' && base.data[cut_off] != '#' && cut_off < base.length) {
@@ -2485,7 +2470,7 @@ struct String resolve_iri(struct String reference, struct String base)
         cut_off = -1;
     }
     bool is_in_path = true;
-    int normalized_path = normalized.length - 1;
+    size_t normalized_path_start = normalized.length - 1;
     while (true) {
         if (i >= source.length) {
             if (source.data != reference.data || source.length != reference.length) {
@@ -2540,7 +2525,7 @@ struct String resolve_iri(struct String reference, struct String base)
             if (source.data[i] == '/') {
                 i += 1;
             }
-            if (normalized.length - 1 == normalized_path) {
+            if (normalized.length - 1 == normalized_path_start) {
                 continue;
             }
             while (normalized.data[normalized.length] != '/') {
@@ -2558,36 +2543,39 @@ struct String resolve_iri(struct String reference, struct String base)
                 APPEND('%');
                 continue;
             }
-            char hex_digit1 = from_hex(source.data[i]);
+            uint_fast8_t hex_digit1 = from_hex(source.data[i]);
             if (hex_digit1 < 0) {
                 APPEND('%');
                 continue;
             }
-            char hex_digit2 = from_hex(source.data[i + 1]);
+            uint_fast8_t hex_digit2 = from_hex(source.data[i + 1]);
             if (hex_digit2 < 0) {
                 APPEND('%');
                 continue;
             }
-            int hex = hex_digit1 * 16 + hex_digit2;
+            unsigned char hex = hex_digit1 * 16 + hex_digit2;
             if (hex >= 'a' && hex <= 'z' || hex >= 'A' && hex <= 'Z' ||
                 hex == '-' || hex == '_' || hex == '.' || hex == '~')
             {
                 APPEND(hex);
             }
             else {
+                // “For consistency, URI producers and normalizers should use uppercase hexadecimal
+                // digits for all percent-encodings.” <https://www.rfc-editor.org/rfc/rfc3986#section-2.1>
+
                 APPEND('%');
                 APPEND(toupper(source.data[i]));
                 APPEND(toupper(source.data[i + 1]));
             }
             i += 1;
         }
-        else if (source.data[i] > 127) {
+        else if ((unsigned char) source.data[i] > 127) {
             APPEND('%');
             unsigned char x;
-            x = source.data[i] >> 4;
+            x = (unsigned char) source.data[i] >> 4;
             x += x < 10 ? '0' : 'A' - 10;
             APPEND(x);
-            x = source.data[i] & 0b1111;
+            x = (unsigned char) source.data[i] & 0b1111;
             x += x < 10 ? '0' : 'A' - 10;
             APPEND(x);
         }

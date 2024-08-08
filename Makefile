@@ -1,4 +1,4 @@
-CFLAGS := -g -fshort-enums -Werror
+CFLAGS := -g -O2 -Wall -Werror -Wno-unused-function -Wno-parentheses
 
 build/test: test.c html_inspector.c
 	gcc $(CFLAGS) test.c -o "$@"
