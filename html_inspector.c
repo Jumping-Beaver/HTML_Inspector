@@ -612,16 +612,17 @@ static const ptrdiff_t POSITION_NOT_STARTED = -1;
 static const ptrdiff_t POSITION_EXHAUSTED = -2;
 
 enum SelectorItemType {
+    AXIS_NTH,
     AXIS_CHILD,
     AXIS_ANCESTOR,
     AXIS_DESCENDANT,
     AXIS_FOLLOWING_SIBLING,
     AXIS_PRECEDING_SIBLING,
+
     FILTER_OR,
     FILTER_NOT,
     FILTER_AND,
     FILTER_CASE_I,
-    FILTER_NTH,
     FILTER_NODE_NAME,
     FILTER_ATTRIBUTE_EXISTS,
     FILTER_ATTRIBUTE_EQUALS,
@@ -633,6 +634,8 @@ enum SelectorItemType {
     FILTER_ATTRIBUTE_STARTS_WITH,
     FILTER_ATTRIBUTE_STARTS_WITH_I,
 };
+
+#define SELECTOR_ITEM_TYPE_IS_FILTER(type) ((type) >= FILTER_OR)
 
 struct Selector {
     struct HtmlDocument *doc;
@@ -1219,9 +1222,10 @@ static struct HtmlDocument * HtmlDocument(const char *html, size_t html_strlen)
                     // Auto-close unclosed nodes with optional end tag
                     // https://html.spec.whatwg.org/multipage/syntax.html#optional-tags
 
-                    struct Node *node = &doc->nodes[unclosed_elements[unclosed_elements_size - 1]];
+                    struct Node *node = unclosed_elements_size == 0 ? NULL :
+                        &doc->nodes[unclosed_elements[unclosed_elements_size - 1]];
 
-                    if (
+                    if (node != NULL && (
                         !CHARSEQICMP(added_node.content, added_node.content_length, "body") &&
                         !CHARSEQICMP(node->content, node->content_length, "head") ||
 
@@ -1319,8 +1323,8 @@ static struct HtmlDocument * HtmlDocument(const char *html, size_t html_strlen)
                             !CHARSEQICMP(added_node.content, added_node.content_length, "section") ||
                             !CHARSEQICMP(added_node.content, added_node.content_length, "table") ||
                             !CHARSEQICMP(added_node.content, added_node.content_length, "ul")
-                        )
-                    ) {
+                        )))
+                    {
                         node->type = NODE_TYPE_NONVOID_ELEMENT;
                         while (++node < &doc->nodes[doc->node_count]) {
                             node->nesting_level += 1;
@@ -1809,25 +1813,25 @@ static bool str_contains(const char *haystack, size_t haystack_length, const cha
 }
 
 static void Selector_push_selector(struct Selector *sel, enum SelectorItemType type,
-    const void *filter_arg1, const void *filter_arg2)
+    const void *filter_arg1, const void *filter_arg2, size_t axis_n)
 {
-    if (sel->item_count == 0 && type >= FILTER_OR) {
+    if (sel->item_count == 0 && SELECTOR_ITEM_TYPE_IS_FILTER(type)) {
         return;
     }
     if (sel->item_count == sizeof sel->items / sizeof *sel->items) {
         return;
     }
     sel->items[sel->item_count].type = type;
-    if (type <= AXIS_PRECEDING_SIBLING) {
-        sel->items[sel->item_count].position = POSITION_NOT_STARTED;
-        sel->items[sel->item_count].axis_n = 0;
-    }
-    else {
+    if (SELECTOR_ITEM_TYPE_IS_FILTER(type)) {
         sel->items[sel->item_count].filter_data.arg1 = filter_arg1;
         if (type >= FILTER_NODE_NAME) {
             sel->items[sel->item_count].filter_data.arg1_strlen = strlen(filter_arg1);
         }
         sel->items[sel->item_count].filter_data.arg2 = filter_arg2;
+    }
+    else {
+        sel->items[sel->item_count].position = POSITION_NOT_STARTED;
+        sel->items[sel->item_count].axis_n = axis_n;
     }
     sel->item_count += 1;
 }
@@ -1838,7 +1842,22 @@ void Selector_iterate_axis(struct Selector *sel, struct SelectorItem *si, const 
         si->position = ref - sel->doc->nodes;
     }
 
-    if (si->type == AXIS_CHILD) {
+    if (si->type == AXIS_NTH) {
+        if (si == sel->items) {
+            if (si->axis_n != 0) {
+                si->position = POSITION_EXHAUSTED;
+            }
+            return;
+        }
+        struct SelectorItem *preceding_axis = si;
+        do {
+            preceding_axis -= 1;
+        } while (SELECTOR_ITEM_TYPE_IS_FILTER(preceding_axis->type));
+        if (si->axis_n + 1 != preceding_axis->axis_n) {
+            si->position = POSITION_EXHAUSTED;
+        }
+    }
+    else if (si->type == AXIS_CHILD) {
         while (si->position++ < sel->doc->node_count - 1) {
             if (sel->doc->nodes[si->position].nesting_level > ref->nesting_level + 1) {
                 continue;
@@ -1888,19 +1907,7 @@ void Selector_iterate_axis(struct Selector *sel, struct SelectorItem *si, const 
 
 static bool Selector_filter(struct Selector *sel, struct SelectorItem *si, struct Node *node)
 {
-    if (si->type == FILTER_NTH) {
-        struct SelectorItem *axis_selector = si;
-        while (true) {
-            if (--axis_selector < sel->items) {
-                return false;
-            }
-            if (axis_selector->type < FILTER_OR) {
-                break;
-            }
-        }
-        return axis_selector->axis_n == (size_t) si->filter_data.arg1;
-    }
-    else if (si->type == FILTER_NODE_NAME) {
+    if (si->type == FILTER_NODE_NAME) {
         const char *name;
         size_t name_length;
         if (node->type == NODE_TYPE_COMMENT) {
@@ -1982,7 +1989,7 @@ ptrdiff_t Selector_iterate(struct Selector *sel)
     while (true) {
         int_fast8_t preceding_axis = sel->active_axis;
         while (preceding_axis-- > 0) {
-            if (sel->items[preceding_axis].type < FILTER_OR) {
+            if (!SELECTOR_ITEM_TYPE_IS_FILTER(sel->items[preceding_axis].type)) {
                 break;
             }
         }
@@ -1996,14 +2003,19 @@ ptrdiff_t Selector_iterate(struct Selector *sel)
             }
             do {
                 sel->active_axis -= 1;
-            } while (sel->active_axis > 0 && sel->items[sel->active_axis].type >= FILTER_OR);
+            } while (
+                sel->active_axis > 0 &&
+                SELECTOR_ITEM_TYPE_IS_FILTER(sel->items[sel->active_axis].type)
+            );
             continue;
         }
 
-        sel->items[sel->active_axis].axis_n += 1;
         int_fast8_t filter_index = sel->active_axis;
         int_fast8_t bool_stack_size = 0;
-        while (++filter_index < sel->item_count && sel->items[filter_index].type >= FILTER_OR) {
+        while (
+            ++filter_index < sel->item_count &&
+            SELECTOR_ITEM_TYPE_IS_FILTER(sel->items[filter_index].type)
+        ) {
             if (sel->items[filter_index].type == FILTER_NOT) {
                 if (bool_stack_size >= 1) {
                     bool_stack[bool_stack_size - 1] = !bool_stack[bool_stack_size - 1];
@@ -2041,80 +2053,83 @@ ptrdiff_t Selector_iterate(struct Selector *sel)
             return sel->items[sel->active_axis].position;
         }
 
+        sel->items[sel->active_axis].axis_n += 1;
         sel->active_axis = filter_index;
         sel->items[sel->active_axis].position = POSITION_NOT_STARTED;
-        sel->items[sel->active_axis].axis_n = 0;
+        if (sel->items[sel->active_axis].type != AXIS_NTH) {
+            sel->items[sel->active_axis].axis_n = 0;
+        }
     }
 }
 
 void Selector_child(struct Selector *sel)
 {
-    Selector_push_selector(sel, AXIS_CHILD, NULL, NULL);
+    Selector_push_selector(sel, AXIS_CHILD, NULL, NULL, 0);
 }
 
 void Selector_ancestor(struct Selector *sel)
 {
-    Selector_push_selector(sel, AXIS_ANCESTOR, NULL, NULL);
+    Selector_push_selector(sel, AXIS_ANCESTOR, NULL, NULL, 0);
 }
 
 void Selector_descendant(struct Selector *sel)
 {
-    Selector_push_selector(sel, AXIS_DESCENDANT, NULL, NULL);
+    Selector_push_selector(sel, AXIS_DESCENDANT, NULL, NULL, 0);
 }
 
 void Selector_preceding_sibling(struct Selector *sel)
 {
-    Selector_push_selector(sel, AXIS_PRECEDING_SIBLING, NULL, NULL);
+    Selector_push_selector(sel, AXIS_PRECEDING_SIBLING, NULL, NULL, 0);
 }
 
 void Selector_following_sibling(struct Selector *sel)
 {
-    Selector_push_selector(sel, AXIS_FOLLOWING_SIBLING, NULL, NULL);
+    Selector_push_selector(sel, AXIS_FOLLOWING_SIBLING, NULL, NULL, 0);
 }
 
 void Selector_nth(struct Selector *sel, size_t n)
 {
-    Selector_push_selector(sel, FILTER_NTH, (void *) (size_t) n, NULL);
+    Selector_push_selector(sel, AXIS_NTH, NULL, NULL, n);
 }
 
 void Selector_name(struct Selector *sel, const char *name)
 {
-    Selector_push_selector(sel, FILTER_NODE_NAME, name, NULL);
+    Selector_push_selector(sel, FILTER_NODE_NAME, name, NULL, 0);
 }
 
 void Selector_attribute_exists(struct Selector *sel, const char *name)
 {
-    Selector_push_selector(sel, FILTER_ATTRIBUTE_EXISTS, name, NULL);
+    Selector_push_selector(sel, FILTER_ATTRIBUTE_EXISTS, name, NULL, 0);
 }
 
 void Selector_attribute_equals(struct Selector *sel, const char *name, const char *value)
 {
-    Selector_push_selector(sel, FILTER_ATTRIBUTE_EQUALS, name, value);
+    Selector_push_selector(sel, FILTER_ATTRIBUTE_EQUALS, name, value, 0);
 }
 
 void Selector_attribute_contains(struct Selector *sel, const char *name, const char *value)
 {
-    Selector_push_selector(sel, FILTER_ATTRIBUTE_CONTAINS, name, value);
+    Selector_push_selector(sel, FILTER_ATTRIBUTE_CONTAINS, name, value, 0);
 }
 
 void Selector_attribute_starts_with(struct Selector *sel, const char *name, const char *value)
 {
-    Selector_push_selector(sel, FILTER_ATTRIBUTE_STARTS_WITH, name, value);
+    Selector_push_selector(sel, FILTER_ATTRIBUTE_STARTS_WITH, name, value, 0);
 }
 
 void Selector_or(struct Selector *sel)
 {
-    Selector_push_selector(sel, FILTER_OR, NULL, NULL);
+    Selector_push_selector(sel, FILTER_OR, NULL, NULL, 0);
 }
 
 void Selector_and(struct Selector *sel)
 {
-    Selector_push_selector(sel, FILTER_AND, NULL, NULL);
+    Selector_push_selector(sel, FILTER_AND, NULL, NULL, 0);
 }
 
 void Selector_not(struct Selector *sel)
 {
-    Selector_push_selector(sel, FILTER_NOT, NULL, NULL);
+    Selector_push_selector(sel, FILTER_NOT, NULL, NULL, 0);
 }
 
 void Selector_case_i(struct Selector *sel)
