@@ -1,6 +1,6 @@
 build/html_inspector.so: phpize html_inspector.c html_inspector_php.c
 	mkdir -p build && cd phpize && \
-	make && cp modules/html_inspector.so ../build # && strip "../$@"
+	make && cp modules/html_inspector.so ../build && strip "../$@"
 
 phpize:
 	mkdir -p phpize && cd phpize && \

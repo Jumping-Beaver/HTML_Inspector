@@ -1,6 +1,8 @@
 #!/usr/bin/env -S php -dextension=build/html_inspector.so
 <?php
 
+        $doc = new HtmlInspector\HtmlDocument($html);
+
 function benchmark_HtmlInspector()
 {
     $html = file_get_contents('../test-html.html');

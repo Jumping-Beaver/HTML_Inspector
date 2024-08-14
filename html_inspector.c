@@ -616,8 +616,8 @@ enum SelectorItemType {
     AXIS_CHILD,
     AXIS_ANCESTOR,
     AXIS_DESCENDANT,
-    AXIS_FOLLOWING_SIBLING,
     AXIS_PRECEDING_SIBLING,
+    AXIS_FOLLOWING_SIBLING,
 
     FILTER_OR,
     FILTER_NOT,
@@ -1836,7 +1836,7 @@ static void Selector_push_selector(struct Selector *sel, enum SelectorItemType t
     sel->item_count += 1;
 }
 
-void Selector_iterate_axis(struct Selector *sel, struct SelectorItem *si, const struct Node *ref)
+static void Selector_iterate_axis(struct Selector *sel, struct SelectorItem *si, const struct Node *ref)
 {
     if (si->position == POSITION_NOT_STARTED) {
         si->position = ref - sel->doc->nodes;
@@ -1887,19 +1887,17 @@ void Selector_iterate_axis(struct Selector *sel, struct SelectorItem *si, const 
     }
     else if (si->type == AXIS_PRECEDING_SIBLING) {
         while (si->position > 0) {
-            const struct Node *node = &sel->doc->nodes[si->position--];
-            if (node->nesting_level > ref->nesting_level) continue;
-            if (node->nesting_level < ref->nesting_level) si->position = POSITION_EXHAUSTED;
-            return;
+            const struct Node *node = &sel->doc->nodes[--si->position];
+            if (node->nesting_level == ref->nesting_level) return;
+            if (node->nesting_level < ref->nesting_level) break;
         }
         si->position = POSITION_EXHAUSTED;
     }
     else if (si->type == AXIS_FOLLOWING_SIBLING) {
         while (si->position < sel->doc->node_count - 1) {
-            const struct Node *node = &sel->doc->nodes[si->position++];
-            if (node->nesting_level > ref->nesting_level) continue;
-            if (node->nesting_level < ref->nesting_level) si->position = POSITION_EXHAUSTED;
-            return;
+            const struct Node *node = &sel->doc->nodes[++si->position];
+            if (node->nesting_level == ref->nesting_level) return;
+            if (node->nesting_level < ref->nesting_level) break;
         }
         si->position = POSITION_EXHAUSTED;
     }
