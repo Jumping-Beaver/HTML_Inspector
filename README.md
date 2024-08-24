@@ -167,7 +167,6 @@ Having to support both decimal and hexadecimal entities is an unneeded complexit
 Another bummer is optional starting and closing tags. They require a large amount of code to
 handle.
 
-
 ## Exploration to optimize the memory allocator of LibXML2
 
 My original idea to was write a fast parser that creates LibXML2-compatible data structure.

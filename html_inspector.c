@@ -646,6 +646,7 @@ struct Selector {
             struct {
                 ptrdiff_t position;
                 size_t axis_n;
+                size_t axis_nth_arg;
             };
             struct {
                 const void *arg1;
@@ -1703,7 +1704,7 @@ struct String HtmlDocument_get_html(struct HtmlDocument *doc, ptrdiff_t node, bo
                 result.data[result.length++] = '=';
                 result.data[result.length++] = '"';
 
-                EXTEND(n->content_length);
+                EXTEND(attribute->value_length);
                 size_t utf8_length = entities_to_utf8(attribute->value, attribute->value_length,
                     &result.data[result.length], false);
                 size_t escape_length = get_escape_length(&result.data[result.length], utf8_length, true);
@@ -1813,7 +1814,7 @@ static bool str_contains(const char *haystack, size_t haystack_length, const cha
 }
 
 static void Selector_push_selector(struct Selector *sel, enum SelectorItemType type,
-    const void *filter_arg1, const void *filter_arg2, size_t axis_n)
+    const void *filter_arg1, const void *filter_arg2, size_t axis_nth_arg)
 {
     if (sel->item_count == 0 && SELECTOR_ITEM_TYPE_IS_FILTER(type)) {
         return;
@@ -1831,7 +1832,7 @@ static void Selector_push_selector(struct Selector *sel, enum SelectorItemType t
     }
     else {
         sel->items[sel->item_count].position = POSITION_NOT_STARTED;
-        sel->items[sel->item_count].axis_n = axis_n;
+        sel->items[sel->item_count].axis_nth_arg = axis_nth_arg;
     }
     sel->item_count += 1;
 }
@@ -1843,8 +1844,12 @@ static void Selector_iterate_axis(struct Selector *sel, struct SelectorItem *si,
     }
 
     if (si->type == AXIS_NTH) {
+        if (si->axis_n == 1) {
+            si->position = POSITION_EXHAUSTED;
+            return;
+        }
         if (si == sel->items) {
-            if (si->axis_n != 0) {
+            if (si->axis_nth_arg != 0) {
                 si->position = POSITION_EXHAUSTED;
             }
             return;
@@ -1853,7 +1858,7 @@ static void Selector_iterate_axis(struct Selector *sel, struct SelectorItem *si,
         do {
             preceding_axis -= 1;
         } while (SELECTOR_ITEM_TYPE_IS_FILTER(preceding_axis->type));
-        if (si->axis_n + 1 != preceding_axis->axis_n) {
+        if (si->axis_nth_arg + 1 != preceding_axis->axis_n) {
             si->position = POSITION_EXHAUSTED;
         }
     }
@@ -2046,17 +2051,13 @@ ptrdiff_t Selector_iterate(struct Selector *sel)
         if (filter_state == false) {
             continue;
         }
-
+        sel->items[sel->active_axis].axis_n += 1;
         if (filter_index == sel->item_count) {
             return sel->items[sel->active_axis].position;
         }
-
-        sel->items[sel->active_axis].axis_n += 1;
         sel->active_axis = filter_index;
         sel->items[sel->active_axis].position = POSITION_NOT_STARTED;
-        if (sel->items[sel->active_axis].type != AXIS_NTH) {
-            sel->items[sel->active_axis].axis_n = 0;
-        }
+        sel->items[sel->active_axis].axis_n = 0;
     }
 }
 
@@ -2187,7 +2188,7 @@ static uint_fast32_t adapt(uint_fast32_t delta, uint_fast32_t numpoints, bool fi
     return k + (BASE - TMIN + 1) * delta / (delta + SKEW);
 }
 
-static uint_fast8_t from_hex(char c)
+static char from_hex(char c)
 {
     if (c >= '0' && c <= '9') return c - '0';
     if (c >= 'a' && c <= 'f') return c - 'a';
@@ -2258,17 +2259,39 @@ struct String resolve_iri(struct String reference, struct String base)
     i = 0;
 
     // Copy the scheme from `source` to the result
+    //
+    // “Scheme names consist of a sequence of characters beginning with a letter and followed by
+    // any combination of letters, digits, plus ("+"), period ("."), or hyphen ("-").”
+
+    if (source.length == 0 || !(
+        source.data[0] >= 'a' && source.data[0] <= 'z' ||
+        source.data[0] >= 'A' && source.data[0] <= 'Z'
+    )) {
+        free(normalized.data);
+        return NULL_STRING;
+    }
 
     size_t scheme_length = 0;
     while (i < source.length && source.data[i] != ':') {
+        if (!(
+            source.data[i] >= 'a' && source.data[i] <= 'z' ||
+            source.data[i] >= 'A' && source.data[i] <= 'Z' ||
+            source.data[i] >= '0' && source.data[i] <= '9' ||
+            source.data[i] == '+' || source.data[i] == '.' || source.data[i] == '-'
+        )) {
+            free(normalized.data);
+            return NULL_STRING;
+        }
         APPEND(tolower(source.data[i]));
         scheme_length += 1;
         i += 1;
     }
-    if (source.data[i] == ':') {
-        APPEND(':');
-        i += 1;
+    if (source.data[i] != ':') {
+        free(normalized.data);
+        return NULL_STRING;
     }
+    APPEND(':');
+    i += 1;
 
     // Copy the authority from `source` to the result
 
@@ -2556,17 +2579,17 @@ struct String resolve_iri(struct String reference, struct String base)
                 APPEND('%');
                 continue;
             }
-            uint_fast8_t hex_digit1 = from_hex(source.data[i]);
-            if (hex_digit1 < 0) {
+            char hex = from_hex(source.data[i]);
+            if (hex < 0) {
                 APPEND('%');
                 continue;
             }
-            uint_fast8_t hex_digit2 = from_hex(source.data[i + 1]);
-            if (hex_digit2 < 0) {
+            char second_hex_digit = from_hex(source.data[i + 1]);
+            if (second_hex_digit < 0) {
                 APPEND('%');
                 continue;
             }
-            unsigned char hex = hex_digit1 * 16 + hex_digit2;
+            hex = (hex << 4) + second_hex_digit;
             if (hex >= 'a' && hex <= 'z' || hex >= 'A' && hex <= 'Z' ||
                 hex == '-' || hex == '_' || hex == '.' || hex == '~')
             {
@@ -2582,13 +2605,12 @@ struct String resolve_iri(struct String reference, struct String base)
             }
             i += 1;
         }
-        else if ((unsigned char) source.data[i] > 127) {
+        else if (source.data[i] < 0) {
             APPEND('%');
-            unsigned char x;
-            x = (unsigned char) source.data[i] >> 4;
+            char x = (unsigned char) source.data[i] >> 4;
             x += x < 10 ? '0' : 'A' - 10;
             APPEND(x);
-            x = (unsigned char) source.data[i] & 0b1111;
+            x = source.data[i] & 0b1111;
             x += x < 10 ? '0' : 'A' - 10;
             APPEND(x);
         }

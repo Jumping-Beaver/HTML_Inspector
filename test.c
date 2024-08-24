@@ -111,21 +111,22 @@ static void test_resolve_iri()
         struct String relative;
         struct String target;
     } test_cases[] = {
+        {STRING(""), STRING(""), NULL_STRING},
         {STRING("http://host:"), STRING(""), STRING("http://host/")},
         {STRING("http://datenbörse.net"), STRING(""), STRING("http://xn--datenbrse-57a.net/")},
-        {STRING("/%p%p"), STRING(""), STRING("/%p%p")},
+        {STRING("g:%p%p"), STRING(""), STRING("g:%p%p")},
         {base, base, base}, // Asserting that there is no endless loop if `reference == base`
         {NULL_STRING, STRING("http://a/b"), STRING("http://a/b")},
         {STRING(""), STRING("http://a/→"), STRING("http://a/%E2%86%92")},
         {STRING("http://a?f"), STRING("p"), STRING("http://a/p")},
         {STRING("http://a/?b?c#b#c"), STRING("?e?f#e#f"), STRING("http://a/?e?f#e#f")},
-        {STRING(""), STRING("HTTP://A/%61%62%63/%25"), STRING("http://a/abc/%25")},
+        {STRING("g:"), STRING("HTTP://A/%61%62%63/%25"), STRING("http://a/abc/%25")},
 
-        {STRING(""), STRING("HTTP://A"), STRING("http://a/")},
-        {STRING(""), STRING("HTTP://A:080"), STRING("http://a/")},
-        {STRING(""), STRING("HTTP://A:081"), STRING("http://a:81/")},
-        {STRING(""), STRING("HTTPS://A:0443"), STRING("https://a/")},
-        {STRING(""), STRING("HTTPS://A:0444"), STRING("https://a:444/")},
+        {STRING("g:"), STRING("HTTP://A"), STRING("http://a/")},
+        {STRING("g:"), STRING("HTTP://A:080"), STRING("http://a/")},
+        {STRING("g:"), STRING("HTTP://A:081"), STRING("http://a:81/")},
+        {STRING("g:"), STRING("HTTPS://A:0443"), STRING("https://a/")},
+        {STRING("g:"), STRING("HTTPS://A:0444"), STRING("https://a:444/")},
 
         //{STRING(""), STRING("hTTp://uSEr:pASSWOrd@aAJDOIJsde/ooob/1c2/u/u/..?abcdef#1234"), STRING("http://a/")},
 
