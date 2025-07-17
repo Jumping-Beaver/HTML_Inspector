@@ -7,7 +7,7 @@
 #include <stdbool.h>
 
 /*****************************************************************************/
-/* Helpers need by both `HtmlDocument` and `Selector` */
+/* Helpers needed by both `HtmlDocument` and `Selector` */
 
 static const char *ENTITIES[1 + (unsigned char) -1] = {
     ['A'] =
@@ -348,10 +348,10 @@ static const char CHARMASK_ATTRIBUTE_VALUE_END[1 + (unsigned char) -1] = {
     ['\0'] = 1,
 };
 
-static const char CHARMASK_VALID_TAG_NAME_START[1 + (unsigned char) -1] = {
-    // https://dev.w3.org/html5/spec-LC/syntax.html#syntax-tag-name
-    // The `–` for custom elements is yet to be incorporated into this standard.
+// https://dev.w3.org/html5/spec-LC/syntax.html#syntax-tag-name
+// The `–` for custom elements is yet to be incorporated into this standard.
 
+static const char CHARMASK_VALID_TAG_NAME_START[1 + (unsigned char) -1] = {
     ['a'] = 1, ['b'] = 1, ['c'] = 1, ['d'] = 1, ['e'] = 1, ['f'] = 1, ['g'] = 1, ['h'] = 1,
     ['i'] = 1, ['j'] = 1, ['k'] = 1, ['l'] = 1, ['m'] = 1, ['n'] = 1, ['o'] = 1, ['p'] = 1,
     ['q'] = 1, ['r'] = 1, ['s'] = 1, ['t'] = 1, ['u'] = 1, ['v'] = 1, ['w'] = 1, ['x'] = 1,
@@ -399,8 +399,8 @@ void String_free(struct String string)
 static size_t entities_to_utf8(const char *input, size_t input_length, char *output,
     bool skip_stray_tags)
 {
-    // When using this function we make use of the fact that the number of bytes written to output
-    // is never greater than `input_length`.
+    // When using this function we make use of the fact that the number of bytes written to
+    // `output` is never greater than `input_length`.
 
     size_t i = 0, k;
     const char *original_output = output;
@@ -513,7 +513,7 @@ static size_t entities_to_utf8(const char *input, size_t input_length, char *out
             continue;
         }
         i += k - 1;
-        if (pos[k] == '&') { // Special case for the &amp; entity
+        if (pos[k] == '&') { // Special case for the `&amp;` entity
             *output++ = '&';
         }
         while (pos[k] != '&' && pos[k] != '\0') {
@@ -530,16 +530,11 @@ static struct String entities_to_utf8_malloc(const char *input, size_t length, b
     }
     char *buffer = malloc(length);
     if (buffer == NULL) {
+        // `has_malloc_error` is supposed to be set in the caller
         return NULL_STRING;
     }
     size_t buffer_length = entities_to_utf8(input, length, buffer, skip_stray_tags);
-    char *buffer_realloc = realloc(buffer, buffer_length);
-    if (buffer_realloc == NULL) {
-        free(buffer);
-        return NULL_STRING;
-    }
-    return (struct String) {buffer_realloc, buffer_length, true};
-
+    return (struct String) {buffer, buffer_length, true};
 }
 
 static int_fast16_t strnicmp(const char *s1, const char *s2, size_t length)
@@ -929,7 +924,7 @@ static struct HtmlDocument * HtmlDocument(const char *html, size_t html_strlen)
     size_t attributes_count = 0;
     ptrdiff_t html_node = -1, head_node = -1, body_node = -1, tbody_node = -2, colgroup_node = -1;
 
-    // Optimized standard library functions such as strchr and strpbrk traverse the string word for
+    // Optimized standard library functions such as `strchr` and `strpbrk` traverse the string word for
     // word and not byte for byte. But called in a loop, they are slower because of the overhead of
     // calculating the bitmasks in every call.
 
@@ -1823,6 +1818,7 @@ static void Selector_push_selector(struct Selector *sel, enum SelectorItemType t
         return;
     }
     sel->items[sel->item_count].type = type;
+    sel->items[sel->item_count].axis_n = 0;
     if (SELECTOR_ITEM_TYPE_IS_FILTER(type)) {
         sel->items[sel->item_count].filter_data.arg1 = filter_arg1;
         if (type >= FILTER_NODE_NAME) {
@@ -2179,7 +2175,6 @@ enum {BASE = 36, TMIN = 1, TMAX = 26, SKEW = 38, DAMP = 700};
 static uint_fast32_t adapt(uint_fast32_t delta, uint_fast32_t numpoints, bool firsttime)
 {
     uint_fast32_t k;
-
     delta = firsttime ? delta / DAMP : delta >> 1;
     delta += delta / numpoints;
     for (k = 0;  delta > ((BASE - TMIN) * TMAX) / 2;  k += BASE) {
@@ -2316,7 +2311,7 @@ struct String resolve_iri(struct String reference, struct String base)
         }
 
         // Append domain and convert IDN to ASCII
-        // Punycode implementation: <https://datatracker.ietf.org/doc/html/rfc3492>
+        // Punycode implementation: https://datatracker.ietf.org/doc/html/rfc3492
 
         size_t domain_label_start = domain_start;
         while (true) {
@@ -2328,7 +2323,7 @@ struct String resolve_iri(struct String reference, struct String base)
                     // “Each node [of the domain name space] has a label, which is zero to 63
                     // octets in length.” https://datatracker.ietf.org/doc/html/rfc1034#section-3.1
 
-                    free(source.data);
+                    free(normalized.data);
                     return NULL_STRING;
                 }
                 if ((unsigned char) source.data[i] < 0b10000000) {
@@ -2397,8 +2392,8 @@ struct String resolve_iri(struct String reference, struct String base)
                 }
 
                 if (next_codepoint - codepoint > (MAX_INT - delta) / (num_handled_codepoints + 1)) {
-                    // PuncyCode overflow
-                    free(source.data);
+                    // Punycode overflow
+                    free(normalized.data);
                     return NULL_STRING;
                 }
                 delta += (next_codepoint - codepoint) * (num_handled_codepoints + 1);
@@ -2408,7 +2403,7 @@ struct String resolve_iri(struct String reference, struct String base)
                 for (i = 0; i < num_codepoints; ++i) {
                     if (codepoints[i] < codepoint && ++delta == 0) {
                         // PunyCode overflow
-                        free(source.data);
+                        free(normalized.data);
                         return NULL_STRING;
                     }
                     if (codepoints[i] == codepoint) {
@@ -2460,7 +2455,7 @@ struct String resolve_iri(struct String reference, struct String base)
             {
                 // “URI producers and normalizers should omit the ":" delimiter that separates host
                 // from port if the port component is empty.”
-                // <https://www.rfc-editor.org/rfc/rfc3986#section-3.2>
+                // https://www.rfc-editor.org/rfc/rfc3986#section-3.2
 
                 i += 1;
             }
@@ -2597,7 +2592,7 @@ struct String resolve_iri(struct String reference, struct String base)
             }
             else {
                 // “For consistency, URI producers and normalizers should use uppercase hexadecimal
-                // digits for all percent-encodings.” <https://www.rfc-editor.org/rfc/rfc3986#section-2.1>
+                // digits for all percent-encodings.” https://www.rfc-editor.org/rfc/rfc3986#section-2.1
 
                 APPEND('%');
                 APPEND(toupper(source.data[i]));
@@ -2626,7 +2621,6 @@ struct String resolve_iri(struct String reference, struct String base)
         return NULL_STRING;
     }
     normalized.data = new_normalized_data;
-
     return normalized;
     #undef APPEND
 }

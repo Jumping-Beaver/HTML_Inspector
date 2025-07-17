@@ -1,4 +1,4 @@
-# HtmlInspector
+# HTML Inspector
 
 This is a readonly error-tolerant HTML parser and URI resolver with focus on fast
 performance. Data queries are supported by iterating over node axes while applying boolean filters,
