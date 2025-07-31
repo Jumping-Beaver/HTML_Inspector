@@ -1,7 +1,7 @@
-#!/usr/bin/env bash
+#!/usr/bin/env sh
 
 # Missing semicolons for codepoints < 256 used to be valid historically but are reported as invalid
-# by validator.w3.org. Here We filter out entities with missing semicolons.
+# by validator.w3.org. Here we filter out entities with missing semicolons.
 
 if [ ! -f entities.json ]; then
     curl https://html.spec.whatwg.org/entities.json > entities.json

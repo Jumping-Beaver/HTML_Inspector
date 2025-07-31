@@ -1,9 +1,9 @@
-#!/usr/bin/env -S php -dextension=build/html_inspector.so
+#!/usr/bin/env -S php -dextension=build/html_inspector_php.so
 <?php
 
 function benchmark_HtmlInspector()
 {
-    $html = file_get_contents('../test-html.html');
+    $html = file_get_contents('test-html.html');
 
     $time = microtime(true);
     $num = 0;
@@ -22,7 +22,7 @@ function benchmark_HtmlInspector()
 
 function benchmark_libxml2()
 {
-    $html = file_get_contents('../test-html.html');
+    $html = file_get_contents('./test-html.html');
 
     $time = microtime(true);
     $num = 0;

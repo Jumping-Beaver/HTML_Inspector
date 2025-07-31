@@ -715,6 +715,7 @@ static bool parse_attribute(struct Attribute *attribute, const char **html_ptr)
 
 struct String HtmlDocument_extract_charset(const char *html)
 {
+    // TODO: The return value does not distinguish between malloc failure and absence of a charset.
     while (true) {
         if (*html == '\0') {
             break;

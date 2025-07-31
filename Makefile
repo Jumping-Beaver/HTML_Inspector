@@ -10,7 +10,12 @@ entities:
 
 check:
 	cppcheck --enable=all --suppress=missingIncludeSystem --suppress=unusedFunction \
-		--check-level=exhaustive html_inspector.c
+	    --check-level=exhaustive html_inspector.c
 
 clean:
 	rm -f build/*
+
+build/html_inspector_php.so: html_inspector_php.c
+	gcc -I/usr/include/php -I/usr/include/php/main -I/usr/include/php/TSRM -I/usr/include/php/Zend \
+	    $(CFLAGS) \
+	    -fPIC -shared "$<" -o "$@"

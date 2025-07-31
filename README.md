@@ -126,6 +126,22 @@ Out of scope:
   Chrome does by default not (always) show decoded domain names in the address bar, and in Firefox
   I recommend to set `network.IDN_show_punycode` to `true`.
 
+## Technical details
+
+### How is the fast performance achieved?
+
+- Conceptually: Only two contiguous memory blocks store the parsed document: a list
+  of nodes and a list of attributes. Other parsers make thousands of memory allocations to
+  build a tree data structure.
+
+- Conceptually: Data queries use lazy evaluation for the iteration over nodes and for the decoding of HTML
+  entities to UTF-8.
+
+- Most essential implementation detail: The parser maintains a stack of unclosed tags to match them
+  quickly. Looping backwards through the whole node list to find them is very slow.
+
+- The named HTML entities are indexed by their first character.
+
 ### About PHP iterators
 
 I have thought back and forth whether to implement PHP iterators to loop through nodes. How PHP
@@ -139,20 +155,6 @@ current value. Another complication is how to encode the non-existence of a node
 we need to use the value `false` and implement union type hints and a respective check for the `get_*`
 methods to enable a concise syntax. Without iterators, we can use the value `-1` and pass it to the
 C functions without further checks.
-
-## How is the fast performance achieved?
-
-- Conceptually: Only two contiguous memory blocks store the parsed document: a list
-  of nodes and a list of attributes. Other parsers make thousands of memory allocations to
-  build a tree data structure.
-
-- Conceptually: Data queries use lazy evaluation for the iteration over nodes and for the decoding of HTML
-  entities to UTF-8.
-
-- Most essential implementation detail: The parser maintains a stack of unclosed tags to match them
-  quickly. Looping backwards through the whole node list to find them is very slow.
-
-- The named HTML entities are indexed by their first character.
 
 ## What makes HTML difficult to parse?
 
@@ -184,3 +186,39 @@ strings, which is not a safe assumption but suitable for testing. Without this a
 have to register the size of every allocation in an efficient search tree. Although the custom
 allocator enhances the performance significantly, it is not satisfactory: from 15 parsings / second
 to 20 parsings / seconds.
+
+### Defects in Python's `lxml` module
+
+`lxml` is a Python binding for LibXML2. It cannot be used to parse HTML correctly. Examples of
+incorrect behavior follow.
+
+Here is omits the script content and generally it incorrectly creates self-closing tags:
+```
+>>> lxml.etree.tostring(lxml.etree.HTML('<script></</script>'))
+b'<html><head><script/></head></html>'
+```
+
+None of the `<a>` strings must be modified here:
+```
+lxml.etree.tostring(lxml.etree.HTML('<title><a></title><textarea><a></textarea><script><a></script>'))
+b'<html><head><title><a/></title><textarea><a/></textarea><script>&lt;a&gt;</script></head></html>'
+```
+
+Inserting a `<p>` node is incorrect:
+```
+>>> lxml.etree.tostring(lxml.etree.HTML('fragment'))
+b'<html><body><p>fragment</p></body></html>'
+````
+
+`&` must not be escaped in script tags:
+```
+>>> lxml.etree.tostring(lxml.etree.HTML('<script>&uuml;</script>'))
+b'<html><head><script>&amp;uuml;</script></head></html>'
+```
+
+### What is `phpize`?
+
+In the context of PHP extensions, `phpize` is a command that creates dozens of files with thousands
+of lines of code to set up a complex and slow C compilation toolchain. It is supposed to provide a
+compatibility layer for MacOS and other systems. It may be overengineered in the age of
+containerization and I don't use it.
