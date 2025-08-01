@@ -11,8 +11,3 @@ build/entities_print_table:
 .PHONY:
 clean:
 	rm -f build/*
-
-build/html_inspector_php.so: html_inspector_php.c
-	gcc $(CFLAGS) \
-	    -I/usr/include/php -I/usr/include/php/main -I/usr/include/php/TSRM -I/usr/include/php/Zend \
-	    -fPIC -shared "$<" -o "$@"
