@@ -149,7 +149,7 @@ to 20 parsings / seconds.
 `lxml` is a Python binding for LibXML2. It cannot be used to parse HTML correctly. Examples of
 incorrect behavior follow.
 
-Here is omits the script content and generally it incorrectly creates self-closing tags:
+Here it omits the script content and generally it incorrectly creates self-closing tags:
 ```
 >>> lxml.etree.tostring(lxml.etree.HTML('<script></</script>'))
 b'<html><head><script/></head></html>'
